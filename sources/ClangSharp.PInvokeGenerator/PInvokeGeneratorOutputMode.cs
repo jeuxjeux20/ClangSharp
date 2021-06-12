@@ -3,6 +3,8 @@ namespace ClangSharp
     public enum PInvokeGeneratorOutputMode
     {
         CSharp,
-        Xml
+        Xml,
+        JniGlue,
+        JavaClasses
     }
 }

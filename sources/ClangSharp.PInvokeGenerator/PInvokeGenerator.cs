@@ -10,6 +10,8 @@ using System.Text;
 using ClangSharp.Abstractions;
 using ClangSharp.CSharp;
 using ClangSharp.Interop;
+using ClangSharp.JNI.Java;
+using ClangSharp.JNI.JNIGlue;
 using ClangSharp.XML;
 
 namespace ClangSharp
@@ -126,6 +128,12 @@ namespace ClangSharp
                     else if (outputBuilder is XmlOutputBuilder xmlOutputBuilder)
                     {
                         hasAnyContents = xmlOutputBuilder.Contents.Any();
+                    } else if (outputBuilder is JniGlueOutputBuilder2)
+                    {
+                        hasAnyContents = true; // TODO: Something more efficient?
+                    } else if (outputBuilder is JavaClassesOutputBuilder)
+                    {
+                        hasAnyContents = true; // TODO: Something more efficient?
                     }
                 }
 
@@ -181,6 +189,32 @@ namespace ClangSharp
 
                             sw.WriteLine("  </comment>");
                         }
+                    } else if (_config.OutputMode == PInvokeGeneratorOutputMode.JniGlue)
+                    {
+                        sw.WriteLine("// Hi, I'm supposed to be JNI glue.");
+                        if (_config.HeaderText != string.Empty)
+                        {
+                            sw.WriteLine(_config.HeaderText);
+                        }
+
+                        var includeGuardName = $"FUMOCEMENT_GLUE_{_config.Namespace.ToUpper().Replace(".", "_")}";
+                        sw.WriteLine($"#ifndef {includeGuardName}");
+                        sw.WriteLine($"#define {includeGuardName}");
+                        sw.WriteLine("#include \"jni.h\"");
+                        sw.WriteLine("#include \"NativeTypes.h\"");
+                        sw.WriteLine("#include <string>");
+                        sw.WriteLine("#include <vector>");
+                        sw.WriteLine("#include \"FumoCement.h\"");
+                    } else if (_config.OutputMode == PInvokeGeneratorOutputMode.JavaClasses)
+                    {
+                        if (_config.HeaderText != string.Empty)
+                        {
+                            sw.WriteLine(_config.HeaderText);
+                        }
+                        sw.WriteLine($"package {_config.Namespace};");
+                        sw.WriteLine();
+                        sw.WriteLine("import com.github.novelrt.fumocement.*;");
+                        sw.WriteLine("import java.nio.charset.*;");
                     }
                 }
             }
@@ -225,6 +259,14 @@ namespace ClangSharp
                 {
                     sw.WriteLine("  </namespace>");
                     sw.WriteLine("</bindings>");
+                } else if (_config.OutputMode == PInvokeGeneratorOutputMode.JniGlue)
+                {
+                    sw.WriteLine();
+                    sw.WriteLine("#endif");
+                } else if (_config.OutputMode == PInvokeGeneratorOutputMode.JavaClasses)
+                {
+                    sw.WriteLine();
+                    sw.WriteLine("}");
                 }
             }
 
@@ -411,6 +453,12 @@ namespace ClangSharp
             else if (outputBuilder is XmlOutputBuilder xmlOutputBuilder)
             {
                 ForXml(xmlOutputBuilder);
+            } else if (outputBuilder is JniGlueOutputBuilder2 jniGlueOutputBuilder)
+            {
+                ForJniGlue(jniGlueOutputBuilder);
+            } else if (outputBuilder is JavaClassesOutputBuilder javaClassesOutputBuilder)
+            {
+                ForJavaClasses(javaClassesOutputBuilder);
             }
 
             void ForCSharp(CSharpOutputBuilder csharpOutputBuilder)
@@ -536,6 +584,29 @@ namespace ClangSharp
                     sw.WriteLine("</namespace>");
                     sw.WriteLine("</bindings>");
                 }
+            }
+
+            void ForJniGlue(JniGlueOutputBuilder2 jniGlueOutputBuilder)
+            {
+                // Am I doing this wrong? Yes.
+                sw.Write(jniGlueOutputBuilder.Content);
+            }
+
+            void ForJavaClasses(JavaClassesOutputBuilder javaClassesOutputBuilder)
+            {
+                if (emitNamespaceDeclaration)
+                {
+                    javaClassesOutputBuilder.WriteIndentedLine("public final class Native");
+                    javaClassesOutputBuilder.WriteBlockStart();
+                    javaClassesOutputBuilder.WriteIndentedLine("private Native() {}");
+                    javaClassesOutputBuilder.WriteNewLine();
+                    javaClassesOutputBuilder.WriteIndentedLine("");
+                }
+                else
+                {
+                    javaClassesOutputBuilder.IncreaseIndentation();
+                }
+                sw.Write(javaClassesOutputBuilder.Content);
             }
         }
 

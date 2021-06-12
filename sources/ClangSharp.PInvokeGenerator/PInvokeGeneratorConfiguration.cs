@@ -19,7 +19,16 @@ namespace ClangSharp
         private readonly Dictionary<string, IReadOnlyList<string>> _withUsings;
         private readonly PInvokeGeneratorConfigurationOptions _options;
 
-        public PInvokeGeneratorConfiguration(string libraryPath, string namespaceName, string outputLocation, string testOutputLocation, PInvokeGeneratorOutputMode outputMode = PInvokeGeneratorOutputMode.CSharp, PInvokeGeneratorConfigurationOptions options = PInvokeGeneratorConfigurationOptions.None, string[] excludedNames = null, string headerFile = null, string methodClassName = null, string methodPrefixToStrip = null, IReadOnlyDictionary<string, string> remappedNames = null, string[] traversalNames = null, IReadOnlyDictionary<string, IReadOnlyList<string>> withAttributes = null, IReadOnlyDictionary<string, string> withCallConvs = null, IReadOnlyDictionary<string, string> withLibraryPaths = null, string[] withSetLastErrors = null, IReadOnlyDictionary<string, string> withTypes = null, IReadOnlyDictionary<string, IReadOnlyList<string>> withUsings = null)
+        public PInvokeGeneratorConfiguration(string libraryPath, string namespaceName, string outputLocation,
+            string testOutputLocation, PInvokeGeneratorOutputMode outputMode = PInvokeGeneratorOutputMode.CSharp,
+            PInvokeGeneratorConfigurationOptions options = PInvokeGeneratorConfigurationOptions.None,
+            string[] excludedNames = null, string headerFile = null, string methodClassName = null,
+            string methodPrefixToStrip = null, IReadOnlyDictionary<string, string> remappedNames = null,
+            string[] traversalNames = null, IReadOnlyDictionary<string, IReadOnlyList<string>> withAttributes = null,
+            IReadOnlyDictionary<string, string> withCallConvs = null,
+            IReadOnlyDictionary<string, string> withLibraryPaths = null, string[] withSetLastErrors = null,
+            IReadOnlyDictionary<string, string> withTypes = null,
+            IReadOnlyDictionary<string, IReadOnlyList<string>> withUsings = null)
         {
             if (excludedNames is null)
             {
@@ -46,9 +55,17 @@ namespace ClangSharp
                 throw new ArgumentNullException(nameof(namespaceName));
             }
 
-            if (outputMode is not PInvokeGeneratorOutputMode.CSharp and not PInvokeGeneratorOutputMode.Xml)
+            if (outputMode is not PInvokeGeneratorOutputMode.CSharp and not PInvokeGeneratorOutputMode.Xml
+                and not PInvokeGeneratorOutputMode.JniGlue and not PInvokeGeneratorOutputMode.JavaClasses)
             {
                 throw new ArgumentOutOfRangeException(nameof(options));
+            }
+
+            if (outputMode is PInvokeGeneratorOutputMode.JniGlue or PInvokeGeneratorOutputMode.JavaClasses &&
+                (options & PInvokeGeneratorConfigurationOptions.GenerateMultipleFiles) != 0)
+            {
+                throw new ArgumentException("Multiple file generation is not yet supported with JNI generation.",
+                    nameof(options));
             }
 
             if (outputMode == PInvokeGeneratorOutputMode.Xml &&
@@ -61,7 +78,8 @@ namespace ClangSharp
                     nameof(options));
             }
 
-            if (options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateCompatibleCode) && options.HasFlag(PInvokeGeneratorConfigurationOptions.GeneratePreviewCode))
+            if (options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateCompatibleCode) &&
+                options.HasFlag(PInvokeGeneratorConfigurationOptions.GeneratePreviewCode))
             {
                 throw new ArgumentOutOfRangeException(nameof(options));
             }
@@ -97,7 +115,9 @@ namespace ClangSharp
             Namespace = namespaceName;
             OutputMode = outputMode;
             OutputLocation = Path.GetFullPath(outputLocation);
-            TestOutputLocation = !string.IsNullOrWhiteSpace(testOutputLocation) ? Path.GetFullPath(testOutputLocation) : string.Empty;
+            TestOutputLocation = !string.IsNullOrWhiteSpace(testOutputLocation)
+                ? Path.GetFullPath(testOutputLocation)
+                : string.Empty;
 
             // Normalize the traversal names to use \ rather than / so path comparisons are simpler
             TraversalNames = traversalNames.Select(traversalName => traversalName.Replace('\\', '/')).ToArray();
@@ -129,7 +149,8 @@ namespace ClangSharp
             AddRange(_withUsings, withUsings);
         }
 
-        public bool DontUseUsingStaticsForEnums => _options.HasFlag(PInvokeGeneratorConfigurationOptions.DontUseUsingStaticsForEnums);
+        public bool DontUseUsingStaticsForEnums =>
+            _options.HasFlag(PInvokeGeneratorConfigurationOptions.DontUseUsingStaticsForEnums);
 
         public bool ExcludeComProxies => _options.HasFlag(PInvokeGeneratorConfigurationOptions.ExcludeComProxies);
 
@@ -139,19 +160,26 @@ namespace ClangSharp
 
         public string[] ExcludedNames { get; }
 
-        public bool GenerateAggressiveInlining => _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateAggressiveInlining);
+        public bool GenerateAggressiveInlining =>
+            _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateAggressiveInlining);
 
-        public bool GenerateCompatibleCode => _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateCompatibleCode);
+        public bool GenerateCompatibleCode =>
+            _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateCompatibleCode);
 
-        public bool GenerateExplicitVtbls => _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateExplicitVtbls);
+        public bool GenerateExplicitVtbls =>
+            _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateExplicitVtbls);
 
-        public bool GenerateMacroBindings => _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateMacroBindings);
+        public bool GenerateMacroBindings =>
+            _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateMacroBindings);
 
-        public bool ExcludeFnptrCodegen => GenerateCompatibleCode || _options.HasFlag(PInvokeGeneratorConfigurationOptions.ExcludeFnptrCodegen);
+        public bool ExcludeFnptrCodegen => GenerateCompatibleCode ||
+                                           _options.HasFlag(PInvokeGeneratorConfigurationOptions.ExcludeFnptrCodegen);
 
-        public bool ExcludeNIntCodegen => GenerateCompatibleCode || _options.HasFlag(PInvokeGeneratorConfigurationOptions.ExcludeNIntCodegen);
+        public bool ExcludeNIntCodegen => GenerateCompatibleCode ||
+                                          _options.HasFlag(PInvokeGeneratorConfigurationOptions.ExcludeNIntCodegen);
 
-        public bool GenerateMultipleFiles => _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateMultipleFiles);
+        public bool GenerateMultipleFiles =>
+            _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateMultipleFiles);
 
         public bool GenerateTestsNUnit => _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateTestsNUnit);
 
@@ -161,31 +189,39 @@ namespace ClangSharp
 
         public string HeaderText { get; }
 
-        public string LibraryPath { get;}
+        public string LibraryPath { get; }
 
         public bool LogExclusions => _options.HasFlag(PInvokeGeneratorConfigurationOptions.LogExclusions);
 
         public bool LogVisitedFiles => _options.HasFlag(PInvokeGeneratorConfigurationOptions.LogVisitedFiles);
 
-        public bool ExcludeFunctionsWithBody => _options.HasFlag(PInvokeGeneratorConfigurationOptions.ExcludeFunctionsWithBody);
+        public bool ExcludeFunctionsWithBody =>
+            _options.HasFlag(PInvokeGeneratorConfigurationOptions.ExcludeFunctionsWithBody);
 
-        public bool ExcludeAnonymousFieldHelpers => _options.HasFlag(PInvokeGeneratorConfigurationOptions.ExcludeAnonymousFieldHelpers);
+        public bool ExcludeAnonymousFieldHelpers =>
+            _options.HasFlag(PInvokeGeneratorConfigurationOptions.ExcludeAnonymousFieldHelpers);
 
-        public bool LogPotentialTypedefRemappings => _options.HasFlag(PInvokeGeneratorConfigurationOptions.LogPotentialTypedefRemappings);
+        public bool LogPotentialTypedefRemappings =>
+            _options.HasFlag(PInvokeGeneratorConfigurationOptions.LogPotentialTypedefRemappings);
 
-        public bool GenerateCppAttributes => _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateCppAttributes);
+        public bool GenerateCppAttributes =>
+            _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateCppAttributes);
 
-        public bool GenerateNativeInheritanceAttribute => _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateNativeInheritanceAttribute);
+        public bool GenerateNativeInheritanceAttribute =>
+            _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateNativeInheritanceAttribute);
 
-        public bool GenerateTemplateBindings => _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateTemplateBindings);
+        public bool GenerateTemplateBindings =>
+            _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateTemplateBindings);
 
-        public bool GenerateVtblIndexAttribute => _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateVtblIndexAttribute);
+        public bool GenerateVtblIndexAttribute =>
+            _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateVtblIndexAttribute);
 
-        public bool GenerateSourceLocationAttribute => _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateSourceLocationAttribute);
+        public bool GenerateSourceLocationAttribute =>
+            _options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateSourceLocationAttribute);
 
         public string MethodClassName { get; }
 
-        public string MethodPrefixToStrip { get;}
+        public string MethodPrefixToStrip { get; }
 
         public string Namespace { get; }
 
@@ -211,7 +247,8 @@ namespace ClangSharp
 
         public IReadOnlyDictionary<string, IReadOnlyList<string>> WithUsings => _withUsings;
 
-        private static void AddRange<TValue>(Dictionary<string, TValue> dictionary, IEnumerable<KeyValuePair<string, TValue>> keyValuePairs)
+        private static void AddRange<TValue>(Dictionary<string, TValue> dictionary,
+            IEnumerable<KeyValuePair<string, TValue>> keyValuePairs)
         {
             if (keyValuePairs != null)
             {

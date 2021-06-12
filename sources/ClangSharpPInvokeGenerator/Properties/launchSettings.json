@@ -16,6 +16,14 @@
     "GenerateLocal": {
       "commandName": "Project",
       "commandLineArgs": "-c help"
+    },
+    "GenerateCpp": {
+      "commandName": "Project",
+      "commandLineArgs": " --file \"D:\\RidiculousClangTests\\legit_c_header.h\" -n fumocement.testbindings -o D:\\RidiculousClangTests\\outputglue.h --output-mode JniGlue"
+    },
+    "GenerateJava": {
+      "commandName": "Project",
+      "commandLineArgs": " --file \"D:\\RidiculousClangTests\\legit_c_header.h\" -n fumocement.testbindings -o D:\\RidiculousClangTests\\Native.java --output-mode JavaClasses"
     }
   }
 }

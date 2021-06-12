@@ -11,6 +11,7 @@ namespace ClangSharp.Abstractions
         public string Type { get; set; }
         public string Name { get; set; }
         public string NativeTypeName { get; set; }
+        public TypeDesc CanonicalNativeType { get; set; }
         public IEnumerable<string> CppAttributes { get; set; }
         public Action<TCustomAttrGeneratorData> WriteCustomAttrs { get; set; }
         public TCustomAttrGeneratorData CustomAttrGeneratorData { get; set; }

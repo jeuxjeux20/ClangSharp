@@ -8,6 +8,7 @@ namespace ClangSharp.Abstractions
     {
         public AccessSpecifier AccessSpecifier { get; set; }
         public string NativeTypeName { get; set; }
+        public TypeDesc NativeCanonicalType { get; set; }
         public string EscapedName { get; set; }
         public int? Offset { get; set; }
         public bool NeedsNewKeyword { get; set; }

@@ -4,6 +4,8 @@ using System;
 using System.Collections.Generic;
 using ClangSharp.Abstractions;
 using ClangSharp.CSharp;
+using ClangSharp.JNI.Java;
+using ClangSharp.JNI.JNIGlue;
 using ClangSharp.XML;
 
 namespace ClangSharp
@@ -11,12 +13,14 @@ namespace ClangSharp
     internal sealed class OutputBuilderFactory
     {
         private readonly PInvokeGeneratorOutputMode _mode;
+        private readonly string _namespace;
         private readonly bool _writeSourceLocation;
         private readonly Dictionary<string, IOutputBuilder> _outputBuilders;
 
         public OutputBuilderFactory(PInvokeGeneratorConfiguration mode)
         {
             _mode = mode.OutputMode;
+            _namespace = mode.Namespace;
             _writeSourceLocation = mode.GenerateSourceLocationAttribute;
             _outputBuilders = new Dictionary<string, IOutputBuilder>();
         }
@@ -36,6 +40,8 @@ namespace ClangSharp
             {
                 PInvokeGeneratorOutputMode.CSharp => (IOutputBuilder) new CSharpOutputBuilder(name, writeSourceLocation: _writeSourceLocation),
                 PInvokeGeneratorOutputMode.Xml => new XmlOutputBuilder(name),
+                PInvokeGeneratorOutputMode.JniGlue => new JniGlueOutputBuilder2(name, _namespace),
+                PInvokeGeneratorOutputMode.JavaClasses => new JavaClassesOutputBuilder(name, _namespace),
                 _ => throw new InvalidOperationException()
             };
 

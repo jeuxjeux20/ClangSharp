@@ -10,6 +10,7 @@ namespace ClangSharp.Abstractions
     {
         public AccessSpecifier AccessSpecifier { get; set; }
         public string NativeTypeName { get; set; }
+        public TypeDesc CanonicalNativeType { get; set; }
         public string EscapedName { get; set; }
         public string EntryPoint { get; set; }
         public string LibraryPath { get; set; }

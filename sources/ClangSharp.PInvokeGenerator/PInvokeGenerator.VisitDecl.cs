@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using ClangSharp.Abstractions;
 using ClangSharp.Interop;
+using ClangSharp.JNI;
 
 namespace ClangSharp
 {
@@ -282,13 +283,13 @@ namespace ClangSharp
 
             _outputBuilder.BeginConstant(in desc);
 
-            if (enumConstantDecl.InitExpr != null)
+            if (!_config.OutputMode.IsJniRelated() && enumConstantDecl.InitExpr != null)
             {
                 _outputBuilder.BeginConstantValue();
                 UncheckStmt(typeName, enumConstantDecl.InitExpr);
                 _outputBuilder.EndConstantValue();
             }
-            else if (isAnonymousEnum)
+            else if (_config.OutputMode.IsJniRelated() || isAnonymousEnum)
             {
                 _outputBuilder.BeginConstantValue();
                 if (IsUnsigned(typeName))
@@ -372,6 +373,7 @@ namespace ClangSharp
             var desc = new FieldDesc
             {
                 AccessSpecifier = accessSpecifier,
+                NativeCanonicalType = TypeDesc.Create(type.CanonicalType),
                 NativeTypeName = nativeTypeName,
                 EscapedName = escapedName,
                 Offset = offset,
@@ -473,6 +475,7 @@ namespace ClangSharp
             {
                 AccessSpecifier = accessSppecifier,
                 NativeTypeName = nativeTypeName,
+                CanonicalNativeType = TypeDesc.Create(type.CanonicalType),
                 EscapedName = escapedName,
                 EntryPoint = entryPoint,
                 CallingConvention = callingConventionName,
@@ -502,7 +505,7 @@ namespace ClangSharp
             _outputBuilder.BeginFunctionOrDelegate(in desc, ref _isMethodClassUnsafe);
 
             var needsReturnFixup = isVirtual && NeedsReturnFixup(cxxMethodDecl);
-
+            
             if ((functionDecl is not CXXConstructorDecl) || (_config.OutputMode == PInvokeGeneratorOutputMode.Xml))
             {
                 _outputBuilder.WriteReturnType(needsReturnFixup ? $"{returnTypeName}*" : returnTypeName);
@@ -637,6 +640,14 @@ namespace ClangSharp
 
         private void VisitIndirectFieldDecl(IndirectFieldDecl indirectFieldDecl)
         {
+            if (_config.OutputMode.IsJniRelated())
+            {
+                // TODO: Implement this! Please!
+                AddDiagnostic(DiagnosticLevel.Warning, "Indirect fields are not supported with JNI generation.",
+                    indirectFieldDecl);
+                return;
+            }
+
             if (_config.ExcludeAnonymousFieldHelpers)
             {
                 return;
@@ -948,6 +959,7 @@ namespace ClangSharp
                     Name = escapedName,
                     Type = typeName,
                     NativeTypeName = nativeTypeName,
+                    CanonicalNativeType = TypeDesc.Create(type.CanonicalType),
                     CppAttributes = _config.GenerateCppAttributes
                         ? parmVarDecl.Attrs.Select(x => EscapeString(x.Spelling))
                         : null,
@@ -995,6 +1007,7 @@ namespace ClangSharp
                     Name = escapedName,
                     Type = typeName,
                     NativeTypeName = nativeTypeName,
+                    CanonicalNativeType = TypeDesc.Create(type.CanonicalType),
                     CppAttributes = _config.GenerateCppAttributes
                         ? parmVarDecl.Attrs.Select(x => EscapeString(x.Spelling))
                         : null,
@@ -1166,7 +1179,7 @@ namespace ClangSharp
                 };
                 _outputBuilder.BeginStruct(in desc);
 
-                if (hasVtbl)
+                if (hasVtbl && !_config.OutputMode.IsJniRelated()) // TODO: Implement this?!
                 {
                     var fieldDesc = new FieldDesc
                     {
@@ -1195,6 +1208,13 @@ namespace ClangSharp
                 {
                     foreach (var cxxBaseSpecifier in cxxRecordDecl.Bases)
                     {
+                        if (_config.OutputMode.IsJniRelated())
+                        {
+                            // TODO: Send help?
+                            AddDiagnostic(DiagnosticLevel.Warning, "Base specifiers are not supported with JNI generation.",
+                                cxxBaseSpecifier);
+                        }
+
                         var baseCxxRecordDecl = GetRecordDeclForBaseSpecifier(cxxBaseSpecifier);
 
                         if (HasFields(baseCxxRecordDecl))
@@ -1509,7 +1529,7 @@ namespace ClangSharp
 
             void OutputVtblEntry(CXXRecordDecl cxxRecordDecl, CXXMethodDecl cxxMethodDecl)
             {
-                if (!cxxMethodDecl.IsVirtual || IsExcluded(cxxMethodDecl))
+                if (!cxxMethodDecl.IsVirtual || IsExcluded(cxxMethodDecl) || Config.OutputMode.IsJniRelated())
                 {
                     return;
                 }
@@ -1540,6 +1560,11 @@ namespace ClangSharp
 
             void OutputVtblHelperMethod(CXXRecordDecl cxxRecordDecl, CXXMethodDecl cxxMethodDecl)
             {
+                if (_config.OutputMode.IsJniRelated())
+                {
+                    return;
+                }
+
                 if (!cxxMethodDecl.IsVirtual)
                 {
                     return;
@@ -1753,6 +1778,12 @@ namespace ClangSharp
 
             void VisitBitfieldDecl(FieldDecl fieldDecl, Type[] types, RecordDecl recordDecl, string contextName, ref int index, ref long previousSize, ref long remainingBits)
             {
+                if (_config.OutputMode.IsJniRelated())
+                {
+                    AddDiagnostic(DiagnosticLevel.Warning, "Bitfield declarations are not supported with JNI generation.", fieldDecl);
+                    return;
+                }
+
                 Debug.Assert(fieldDecl.IsBitField);
 
                 var type = fieldDecl.Type;
@@ -2149,6 +2180,14 @@ namespace ClangSharp
             {
                 Debug.Assert(constantArray.Type.CanonicalType is ConstantArrayType);
 
+                if (_config.OutputMode.IsJniRelated())
+                {
+                    AddDiagnostic(DiagnosticLevel.Warning,
+                        "Constant array fields are not yet supported with JNI generation. This field will be skipped.",
+                        constantArray);
+                    return;
+                }
+
                 var outputBuilder = _outputBuilder;
                 var type = (ConstantArrayType)constantArray.Type.CanonicalType;
                 var typeName = GetRemappedTypeName(constantArray, context: null, constantArray.Type, out _);
@@ -2243,6 +2282,7 @@ namespace ClangSharp
                     {
                         AccessSpecifier = accessSpecifier,
                         NativeTypeName = null,
+                        NativeCanonicalType = TypeDesc.Create(type.CanonicalType),
                         EscapedName = fieldName,
                         Offset = null,
                         NeedsNewKeyword = false,
@@ -2429,6 +2469,7 @@ namespace ClangSharp
                         CallingConvention = callingConventionName,
                         CustomAttrGeneratorData = (name, this),
                         EscapedName = escapedName,
+                        CanonicalNativeType = TypeDesc.Create(functionProtoType.CanonicalType),
                         IsVirtual = true, // such that it outputs as a delegate
                         IsUnsafe = IsUnsafe(typedefDecl, functionProtoType),
                         NativeTypeName = nativeTypeName,
