@@ -14,6 +14,7 @@ namespace ClangSharp
     {
         private readonly PInvokeGeneratorOutputMode _mode;
         private readonly string _namespace;
+        private readonly string _methodClassName;
         private readonly bool _writeSourceLocation;
         private readonly Dictionary<string, IOutputBuilder> _outputBuilders;
 
@@ -21,6 +22,7 @@ namespace ClangSharp
         {
             _mode = mode.OutputMode;
             _namespace = mode.Namespace;
+            _methodClassName = mode.MethodClassName;
             _writeSourceLocation = mode.GenerateSourceLocationAttribute;
             _outputBuilders = new Dictionary<string, IOutputBuilder>();
         }
@@ -40,8 +42,8 @@ namespace ClangSharp
             {
                 PInvokeGeneratorOutputMode.CSharp => (IOutputBuilder) new CSharpOutputBuilder(name, writeSourceLocation: _writeSourceLocation),
                 PInvokeGeneratorOutputMode.Xml => new XmlOutputBuilder(name),
-                PInvokeGeneratorOutputMode.JniGlue => new JniGlueOutputBuilder2(name, _namespace),
-                PInvokeGeneratorOutputMode.JavaClasses => new JavaClassesOutputBuilder(name, _namespace),
+                PInvokeGeneratorOutputMode.JniGlue => new JniGlueOutputBuilder2(name, _namespace, _methodClassName),
+                PInvokeGeneratorOutputMode.JavaClasses => new JavaClassesOutputBuilder(name, _namespace, _methodClassName),
                 _ => throw new InvalidOperationException()
             };
 

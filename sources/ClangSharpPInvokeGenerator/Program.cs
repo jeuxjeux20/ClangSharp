@@ -11,6 +11,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using ClangSharp.Interop;
+using Process = System.Diagnostics.Process;
 
 namespace ClangSharp
 {

@@ -19,11 +19,11 @@
     },
     "GenerateCpp": {
       "commandName": "Project",
-      "commandLineArgs": " --file \"D:\\RidiculousClangTests\\legit_c_header.h\" -n fumocement.testbindings -o D:\\RidiculousClangTests\\outputglue.h --output-mode JniGlue"
+      "commandLineArgs": " --file \"D:\\RidiculousClangTests\\legit_c_header.h\" -n fumocement.testbindings -o D:\\RidiculousClangTests\\outputglue.h --output-mode JniGlue -m Native"
     },
     "GenerateJava": {
       "commandName": "Project",
-      "commandLineArgs": " --file \"D:\\RidiculousClangTests\\legit_c_header.h\" -n fumocement.testbindings -o D:\\RidiculousClangTests\\Native.java --output-mode JavaClasses"
+      "commandLineArgs": " --file \"D:\\RidiculousClangTests\\legit_c_header.h\" -n fumocement.testbindings -o D:\\RidiculousClangTests\\Native.java --output-mode JavaClasses -m Native"
     }
   }
 }

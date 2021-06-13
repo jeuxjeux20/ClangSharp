@@ -27,12 +27,13 @@ namespace ClangSharp.JNI
         private PreliminaryFunction _preliminaryFunction;
         private PreliminaryStruct _preliminaryStruct;
 
-        protected JniOutputBuilderBase(string name, string indentationString, string @namespace)
+        protected JniOutputBuilderBase(string name, string indentationString,
+            string @namespace, string container)
         {
             Name = name;
             _indentationString = indentationString;
             Namespace = @namespace;
-            CurrentGenerationPlan = new JniGenerationPlan { Package = Namespace };
+            CurrentGenerationPlan = new JniGenerationPlan { ContainerClass = container, Package = Namespace };
         }
 
         protected static UnsupportedJniScenarioException UnsupportedType<T>(T type)
@@ -409,7 +410,13 @@ namespace ClangSharp.JNI
 
         public virtual void BeginStruct<TCustomAttrGeneratorData>(in StructDesc<TCustomAttrGeneratorData> info)
         {
-            _preliminaryStruct = new PreliminaryStruct { JavaName = JavaConventions.EscapeName(info.EscapedName) };
+            if (info.IsComplete)
+            {
+                var javaName = JavaConventions.EscapeName(info.EscapedName);
+
+                _preliminaryStruct =
+                    new PreliminaryStruct(javaName, CurrentGenerationPlan.StructTypeInContainer(javaName));
+            }
         }
 
         public virtual void BeginExplicitVtbl()
@@ -430,7 +437,7 @@ namespace ClangSharp.JNI
             }
 
             CurrentGenerationPlan.Structs.Add(
-                new StructGenerationInfo(_preliminaryStruct.JavaName, _preliminaryStruct.Fields));
+                CurrentGenerationPlan.MakeStructGenerationInfo(_preliminaryStruct.JavaName, _preliminaryStruct.Fields));
 
             _preliminaryStruct = null;
         }
@@ -551,7 +558,7 @@ namespace ClangSharp.JNI
             generator.Consume(field.Type, "returnValue", ValuePassContext.StructFieldReturnValue);
 
             return BuildGenerationSet(publicMethodName, nativeMethodName,
-                _preliminaryStruct.FullJavaName, false, generator);
+                _preliminaryStruct.JavaType.RawName, false, generator);
         }
 
         private MethodGenerationSet CreateFieldSetterMethodGenerationSet(PreliminaryStructField field)
@@ -565,7 +572,7 @@ namespace ClangSharp.JNI
             generator.Consume(field.Type, "value", ValuePassContext.StructFieldSetterParameter);
 
             return BuildGenerationSet(publicMethodName, nativeMethodName,
-                _preliminaryStruct.FullJavaName, false, generator);
+                _preliminaryStruct.JavaType.RawName, false, generator);
         }
 
         private MethodGenerationSet CreateFunctionMethodGenerationSet(in PreliminaryFunction function)
@@ -576,12 +583,12 @@ namespace ClangSharp.JNI
             var generator = new ValuePassGenerator(CurrentGenerationPlan);
 
             generator.ConsumeFunctionParameters(function.Parameters, publicMethodName,
-                JavaConventions.ContainerClassName);
+                CurrentGenerationPlan.ContainerClass);
 
             generator.Consume(function.ReturnType, "returnValue", ValuePassContext.MethodReturnValue);
 
             return BuildGenerationSet(publicMethodName, nativeMethodName,
-                JavaConventions.ContainerClassName, true, generator);
+                CurrentGenerationPlan.ContainerClass, true, generator);
         }
 
         private static MethodGenerationSet BuildGenerationSet(
@@ -612,7 +619,7 @@ namespace ClangSharp.JNI
                     isStatic
                 ),
                 generator.ReturnTypePass,
-                generator.ParametersPasses
+                generator.ParameterPasses
             );
         }
 
@@ -673,8 +680,14 @@ namespace ClangSharp.JNI
 
         private class PreliminaryStruct
         {
-            public string JavaName { get; set; }
-            public string FullJavaName => JavaConventions.JavaStructClass(JavaName);
+            public PreliminaryStruct(string javaName, ObjectJavaType javaType)
+            {
+                JavaName = javaName;
+                JavaType = javaType;
+            }
+
+            public string JavaName { get; }
+            public ObjectJavaType JavaType { get; }
 
             public List<StructFieldGenerationInfo> Fields { get; } = new();
         }

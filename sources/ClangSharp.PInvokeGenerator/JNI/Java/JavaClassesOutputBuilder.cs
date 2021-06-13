@@ -12,8 +12,9 @@ namespace ClangSharp.JNI.Java
     internal class JavaClassesOutputBuilder : JniOutputBuilderBase
     {
         public JavaClassesOutputBuilder(string name, string @namespace,
+            string container,
             string indentationString = DefaultIndentationString) : base(name,
-            indentationString, @namespace)
+            indentationString, @namespace, container)
         {
             CurrentBraceStyle = BraceStyle.KAndR;
         }
@@ -179,7 +180,7 @@ namespace ClangSharp.JNI.Java
         {
             return pass switch {
                 PassPrimitive or PassPointerAsJLongToPtr or PassEnumLongAsJLongToEnum
-                    => ((SingleVariableValuePass)pass).ValueToPass,
+                    => ((StandaloneValuePass)pass).ValueToPass,
 
                 PassNestedStructAsJLongPointerToStructPtr passStruct
                     => $"{passStruct.JavaStructName}.getTrackedAndUnowned({passStruct.ValueToPass})",
@@ -203,12 +204,12 @@ namespace ClangSharp.JNI.Java
                 PassPrimitive or
                     PassPointerAsJLongToPtr or
                     PassEnumLongAsJLongToEnum
-                    => ((SingleVariableValuePass)pass).ValueToPass,
+                    => ((StandaloneValuePass)pass).ValueToPass,
 
                 PassNestedStructAsJLongPointerToStructPtr or
                     PassStructAsJLongPointerToStructCopy or
                     PassFunctionPointerAsContextPtr
-                    => $"{((SingleVariableValuePass)pass).ValueToPass}.getHandle()",
+                    => $"{((StandaloneValuePass)pass).ValueToPass}.getHandle()",
 
                 PassStringAsJByteArrayToCharPtr passString
                     => $"{passString.ValueToPass}.getBytes()",

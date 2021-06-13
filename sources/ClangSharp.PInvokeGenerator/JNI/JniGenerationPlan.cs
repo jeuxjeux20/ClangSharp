@@ -10,7 +10,9 @@ namespace ClangSharp.JNI
 {
     internal sealed class JniGenerationPlan
     {
-        public string Package { get; init; }
+        public string ContainerClass { get; set; } = "Native";
+
+        public string Package { get; set; }
 
         public List<MethodGenerationInfo> Methods { get; } = new();
 
@@ -20,24 +22,33 @@ namespace ClangSharp.JNI
 
         public List<JavaCallbackGenerationInfo> JavaCallbacks { get; } = new();
 
+        public StructGenerationInfo MakeStructGenerationInfo(string structName, IEnumerable<StructFieldGenerationInfo> fields)
+            => new(structName, StructTypeName(structName), StructTypeInContainer(structName), fields);
+
         public ObjectJavaType NestedTypeInContainer(string name)
-            => new(Package, $"{JavaConventions.ContainerClassName}.{name}");
+            => new(Package, $"{ContainerClass}.{name}");
+
+        public ObjectJavaType StructTypeInContainer(string name)
+            => new(Package, $"{ContainerClass}.{StructTypeName(name)}");
+
+        public static string StructTypeName(string name)
+            => $"{name}";
     }
 
     internal sealed class StructGenerationInfo
     {
-        public StructGenerationInfo(string nativeName, IEnumerable<StructFieldGenerationInfo> fields)
+        public StructGenerationInfo(string nativeName, string javaName, ObjectJavaType javaType, IEnumerable<StructFieldGenerationInfo> fields)
         {
             NativeName = nativeName;
-            JavaName = nativeName + "Struct";
-            JavaNameWithNestedType = JavaConventions.JavaStructClass(JavaName);
+            JavaType = javaType;
+            JavaName = javaName;
             Fields = fields.ToArray();
         }
 
         public string NativeName { get; }
         public string JavaName { get; }
 
-        public string JavaNameWithNestedType { get; }
+        public ObjectJavaType JavaType { get; }
 
         public IReadOnlyList<StructFieldGenerationInfo> Fields { get; }
 
@@ -135,7 +146,7 @@ namespace ClangSharp.JNI
     {
         public JavaCallbackGenerationSet(FullJavaMethod callbackCallMethod,
             BodylessJavaMethod upstreamInterfaceMethod,
-            SingleVariableValuePass upstreamReturnValuePass,
+            StandaloneValuePass upstreamReturnValuePass,
             IEnumerable<ValuePass> upstreamParameterPasses)
         {
             CallbackCallMethod = callbackCallMethod;
@@ -154,7 +165,7 @@ namespace ClangSharp.JNI
         public FullJavaMethod CallbackCallMethod { get; }
         public BodylessJavaMethod UpstreamInterfaceMethod { get; }
 
-        public SingleVariableValuePass UpstreamReturnValuePass { get; }
+        public StandaloneValuePass UpstreamReturnValuePass { get; }
         public IReadOnlyList<ValuePass> UpstreamParameterPasses { get; }
     }
 
@@ -165,7 +176,7 @@ namespace ClangSharp.JNI
     {
         public FunctionPointerProxyGenerationSet(NativeMethod nativeLambda,
             FullJavaMethod upstreamCallbackCallMethod,
-            SingleVariableValuePass upstreamReturnValuePass,
+            StandaloneValuePass upstreamReturnValuePass,
             IEnumerable<ValuePass> upstreamParameterPasses, string castedFuncContextVariable)
         {
             NativeLambda = nativeLambda;
@@ -187,7 +198,7 @@ namespace ClangSharp.JNI
 
         public string CastedFuncContextVariable { get; }
 
-        public SingleVariableValuePass UpstreamReturnValuePass { get; }
+        public StandaloneValuePass UpstreamReturnValuePass { get; }
         public IReadOnlyList<ValuePass> UpstreamParameterPasses { get; }
     }
 
@@ -196,7 +207,7 @@ namespace ClangSharp.JNI
         public MethodGenerationSet(JniGlueMethod jniGlueMethod,
             BodylessJavaMethod internalJavaNativeMethod,
             FullJavaMethod publicJavaMethod,
-            SingleVariableValuePass returnValuePass,
+            StandaloneValuePass returnValuePass,
             IEnumerable<ValuePass> parameterPasses)
         {
             JniGlueMethod = jniGlueMethod;
@@ -225,8 +236,8 @@ namespace ClangSharp.JNI
         public BodylessJavaMethod InternalJavaNativeMethod { get; }
         public FullJavaMethod PublicJavaMethod { get; }
 
-        public SingleVariableValuePass JniToCReturnValuePass { get; }
-        public SingleVariableValuePass JavaToJniReturnValuePass { get; }
+        public StandaloneValuePass JniToCReturnValuePass { get; }
+        public StandaloneValuePass JavaToJniReturnValuePass { get; }
         public IReadOnlyList<ValuePass> JniToCParameterPasses { get; }
         public IReadOnlyList<ValuePass> JavaToJniParameterPasses { get; }
     }
@@ -316,22 +327,29 @@ namespace ClangSharp.JNI
         All = JniToC | JavaToJni
     }
 
+    /// <summary>
+    /// Defines how to pass a value to C, JNI or Java.
+    /// </summary>
     internal abstract class ValuePass
     {
         public virtual ValuePassLayers Layers => ValuePassLayers.All;
 
-        public string IntermediateVariableName => VariableNameHint + "__intermediate";
+        public string IntermediateVariableName => VariableNameHint + "$$intermediate";
 
         protected abstract string VariableNameHint { get; }
     }
 
-    internal abstract class SingleVariableValuePass : ValuePass
+    /// <summary>
+    /// A <see cref="ValuePass"/> which is composed from one variable and does not require any external
+    /// state to be valid.
+    /// </summary>
+    internal abstract class StandaloneValuePass : ValuePass
     {
         public string ValueToPass { get; }
 
         protected override string VariableNameHint => ValueToPass;
 
-        public SingleVariableValuePass(string valueToPass)
+        public StandaloneValuePass(string valueToPass)
         {
             ValueToPass = valueToPass;
         }
@@ -344,7 +362,7 @@ namespace ClangSharp.JNI
         protected override string VariableNameHint => "handle";
     }
 
-    internal sealed class PassStringAsJByteArrayToCharPtr : SingleVariableValuePass
+    internal sealed class PassStringAsJByteArrayToCharPtr : StandaloneValuePass
     {
         public bool RequiresDeletionEnum => DeletionEnumParameter != null;
         public string DeletionEnumParameter { get; }
@@ -355,7 +373,7 @@ namespace ClangSharp.JNI
         }
     }
 
-    internal sealed class PassStringDeletionEnumAsBool : SingleVariableValuePass
+    internal sealed class PassStringDeletionEnumAsBool : StandaloneValuePass
     {
         public override ValuePassLayers Layers => ValuePassLayers.JavaToJni;
 
@@ -364,7 +382,7 @@ namespace ClangSharp.JNI
         }
     }
 
-    internal sealed class PassNestedStructAsJLongPointerToStructPtr : SingleVariableValuePass
+    internal sealed class PassNestedStructAsJLongPointerToStructPtr : StandaloneValuePass
     {
         public PassNestedStructAsJLongPointerToStructPtr(RecordTypeDesc record, string javaStructName,
             string valueToPass) : base(valueToPass)
@@ -377,7 +395,7 @@ namespace ClangSharp.JNI
         public string JavaStructName { get; }
     }
 
-    internal sealed class PassStructAsJLongPointerToStructCopy : SingleVariableValuePass
+    internal sealed class PassStructAsJLongPointerToStructCopy : StandaloneValuePass
     {
         public PassStructAsJLongPointerToStructCopy(RecordTypeDesc record, string javaStructName,
             string valueToPass) : base(valueToPass)
@@ -390,17 +408,17 @@ namespace ClangSharp.JNI
         public string JavaStructName { get; }
     }
 
-    internal sealed class PassPointerAsJLongToPtr : SingleVariableValuePass
+    internal sealed class PassPointerAsJLongToPtr : StandaloneValuePass
     {
         public PassPointerAsJLongToPtr(PointerTypeDesc pointer, string valueToPass) : base(valueToPass)
         {
             Pointer = pointer;
         }
 
-        public PointerTypeDesc Pointer { get; init; }
+        public PointerTypeDesc Pointer { get; }
     }
 
-    internal sealed class PassEnumLongAsJLongToEnum : SingleVariableValuePass
+    internal sealed class PassEnumLongAsJLongToEnum : StandaloneValuePass
     {
         public EnumTypeDesc EnumType { get; }
 
@@ -410,7 +428,7 @@ namespace ClangSharp.JNI
         }
     }
 
-    internal sealed class PassFunctionPointerAsContextPtr : SingleVariableValuePass
+    internal sealed class PassFunctionPointerAsContextPtr : StandaloneValuePass
     {
         public PassFunctionPointerAsContextPtr(string valueToPass) : base(valueToPass)
         {
@@ -429,10 +447,10 @@ namespace ClangSharp.JNI
         }
 
         public override ValuePassLayers Layers => ValuePassLayers.JniToC;
-        protected override string VariableNameHint => JavaFunctionHandleVariable + "__context";
+        protected override string VariableNameHint => JavaFunctionHandleVariable + "$$context";
     }
 
-    internal sealed class PassFunctionPointerProxyLambda : SingleVariableValuePass
+    internal sealed class PassFunctionPointerProxyLambda : StandaloneValuePass
     {
         public FunctionPointerProxyGenerationSet LambdaProxyGenerationSet { get; }
 
@@ -467,7 +485,7 @@ namespace ClangSharp.JNI
         public override ValuePassLayers Layers => ValuePassLayers.JavaToJni;
     }
 
-    internal sealed class PassPrimitive : SingleVariableValuePass
+    internal sealed class PassPrimitive : StandaloneValuePass
     {
         public PassPrimitive(BuiltinTypeDesc builtin, string valueToPass) : base(valueToPass)
         {

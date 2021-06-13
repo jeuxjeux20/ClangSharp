@@ -7,8 +7,6 @@ namespace ClangSharp.JNI
 {
     public static class JavaConventions
     {
-        public const string ContainerClassName = "Native";
-
         public static string EscapeName(string name)
         {
             // This is a dirty hack to avoid C# escapes.
@@ -44,8 +42,6 @@ namespace ClangSharp.JNI
         } + UppercaseFirstLetter(variableName);
 
         public static string Setter(string variableName) => "set" + UppercaseFirstLetter(variableName);
-
-        public static string JavaStructClass(string name) => $"{ContainerClassName}${name}";
 
         public static string ToScreamingCase(string value)
         {

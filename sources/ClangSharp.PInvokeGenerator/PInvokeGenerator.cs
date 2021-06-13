@@ -191,7 +191,6 @@ namespace ClangSharp
                         }
                     } else if (_config.OutputMode == PInvokeGeneratorOutputMode.JniGlue)
                     {
-                        sw.WriteLine("// Hi, I'm supposed to be JNI glue.");
                         if (_config.HeaderText != string.Empty)
                         {
                             sw.WriteLine(_config.HeaderText);
@@ -200,11 +199,15 @@ namespace ClangSharp
                         var includeGuardName = $"FUMOCEMENT_GLUE_{_config.Namespace.ToUpper().Replace(".", "_")}";
                         sw.WriteLine($"#ifndef {includeGuardName}");
                         sw.WriteLine($"#define {includeGuardName}");
+                        sw.WriteLine("#pragma warning(push, 0)");
                         sw.WriteLine("#include \"jni.h\"");
                         sw.WriteLine("#include \"NativeTypes.h\"");
                         sw.WriteLine("#include <string>");
                         sw.WriteLine("#include <vector>");
                         sw.WriteLine("#include \"FumoCement.h\"");
+                        sw.WriteLine();
+                        sw.WriteLine("extern \"C\"");
+                        sw.Write("{");
                     } else if (_config.OutputMode == PInvokeGeneratorOutputMode.JavaClasses)
                     {
                         if (_config.HeaderText != string.Empty)
@@ -262,6 +265,8 @@ namespace ClangSharp
                 } else if (_config.OutputMode == PInvokeGeneratorOutputMode.JniGlue)
                 {
                     sw.WriteLine();
+                    sw.WriteLine("}");
+                    sw.WriteLine("#pragma warning(push, 0)");
                     sw.WriteLine("#endif");
                 } else if (_config.OutputMode == PInvokeGeneratorOutputMode.JavaClasses)
                 {
@@ -589,6 +594,7 @@ namespace ClangSharp
             void ForJniGlue(JniGlueOutputBuilder2 jniGlueOutputBuilder)
             {
                 // Am I doing this wrong? Yes.
+                jniGlueOutputBuilder.IncreaseIndentation();
                 sw.Write(jniGlueOutputBuilder.Content);
             }
 
@@ -596,11 +602,11 @@ namespace ClangSharp
             {
                 if (emitNamespaceDeclaration)
                 {
-                    javaClassesOutputBuilder.WriteIndentedLine("public final class Native");
-                    javaClassesOutputBuilder.WriteBlockStart();
-                    javaClassesOutputBuilder.WriteIndentedLine("private Native() {}");
+                    javaClassesOutputBuilder.WriteIndentedLine("@SuppressWarnings(\"ALL\")");
                     javaClassesOutputBuilder.WriteNewLine();
-                    javaClassesOutputBuilder.WriteIndentedLine("");
+                    javaClassesOutputBuilder.Write($"public final class {_config.MethodClassName}");
+                    javaClassesOutputBuilder.WriteBlockStart();
+                    javaClassesOutputBuilder.WriteIndentedLine($"private {_config.MethodClassName}() {{}}");
                 }
                 else
                 {

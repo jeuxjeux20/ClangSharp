@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using ClangSharp.JNI;
 
 namespace ClangSharp
 {
@@ -64,6 +65,14 @@ namespace ClangSharp
             if (outputMode is PInvokeGeneratorOutputMode.JniGlue or PInvokeGeneratorOutputMode.JavaClasses &&
                 (options & PInvokeGeneratorConfigurationOptions.GenerateMultipleFiles) != 0)
             {
+                // Why?
+                // - Java does not support partial classes
+                // - We're putting all the types into a nested class currently
+                // - Java requires one class by file, and that file must be named with the exact name of that class
+                // - Java requires the directories to exactly resemble the package:
+                //   | com.github.clangsharp -> com/github/clangsharp
+                //
+                // While this is possible, it's probably too much work for what it's worth.
                 throw new ArgumentException("Multiple file generation is not yet supported with JNI generation.",
                     nameof(options));
             }

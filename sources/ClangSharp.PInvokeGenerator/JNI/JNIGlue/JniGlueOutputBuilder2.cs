@@ -12,8 +12,9 @@ namespace ClangSharp.JNI.JNIGlue
     internal sealed class JniGlueOutputBuilder2 : JniOutputBuilderBase
     {
         public JniGlueOutputBuilder2(string name, string @namespace,
+            string container,
             string indentationString = DefaultIndentationString) : base(name,
-            indentationString, @namespace)
+            indentationString, @namespace, container)
         {
         }
 
@@ -47,7 +48,7 @@ namespace ClangSharp.JNI.JNIGlue
         private void WriteAllocateStructMethod(StructGenerationInfo @struct)
         {
             BeginJniMethod(JniType.JLong,
-                @struct.JavaNameWithNestedType,
+                @struct.JavaType.RawName,
                 @struct.AllocateStructMethodName,
                 true,
                 Array.Empty<MethodParameter<JniType>>());
@@ -60,7 +61,7 @@ namespace ClangSharp.JNI.JNIGlue
         private void WriteDestroyStructMethod(StructGenerationInfo @struct)
         {
             BeginJniMethod("void",
-                @struct.JavaNameWithNestedType,
+                @struct.JavaType.RawName,
                 @struct.DestroyStructMethodName,
                 true,
                 new MethodParameter<JniType>[] { new(JniType.JLong, "handle") });
@@ -102,7 +103,7 @@ namespace ClangSharp.JNI.JNIGlue
 
             // TODO: Dirty, maybe create some StructFieldSetterMethodGenerationSet
             var handleName = glueMethod.Parameters[0].Name;
-            var setterValuePass = (SingleVariableValuePass)generationSet.JniToCParameterPasses[0];
+            var setterValuePass = (StandaloneValuePass)generationSet.JniToCParameterPasses[0];
 
             WriteIndentedLine(
                 $"auto& {setterValuePass.IntermediateVariableName} = " +
@@ -291,7 +292,7 @@ namespace ClangSharp.JNI.JNIGlue
                     => $"FumoCement::toNativePrimitive({passPrimitive.ValueToPass})",
 
                 PassPointerAsJLongToPtr passPointer
-                    => $"FumoCement::toNativePointer<{passPointer.Pointer.PointeeType}>({passPointer.ValueToPass});",
+                    => $"FumoCement::toNativePointer<{passPointer.Pointer.PointeeType.AsRawString}>({passPointer.ValueToPass})",
 
                 PassStringAsJByteArrayToCharPtr { RequiresDeletionEnum: false } passString
                     => $"FumoCement::toCppString({envVariable}, {passString.ValueToPass})",
@@ -344,7 +345,7 @@ namespace ClangSharp.JNI.JNIGlue
         private void BeginJniMethod(string returnType, string javaType, string javaMethodName, bool isStatic,
             IEnumerable<MethodParameter<JniType>> arguments)
         {
-            WriteIndentedLine("extern \"C\" JNIEXPORT ");
+            WriteIndentedLine("JNIEXPORT ");
             Write(returnType);
             Write(" JNICALL ");
 
@@ -356,7 +357,7 @@ namespace ClangSharp.JNI.JNIGlue
             Write(MangleNameForJniMethod(javaMethodName));
 
             Write("(JNIEnv* env, ");
-            Write(isStatic ? "jclass" : "jobject thisObject");
+            Write(isStatic ? "jclass" : "jobject");
 
             foreach (var arg in arguments)
             {
@@ -380,7 +381,7 @@ namespace ClangSharp.JNI.JNIGlue
             for (var i = 0; i < nativeLambda.Parameters.Count; i++)
             {
                 var param = nativeLambda.Parameters[i];
-                Write(param.Type);
+                Write(param.Type.AsRawString);
                 Write(" ");
                 Write(param.Name);
                 if (i != nativeLambda.Parameters.Count - 1)
@@ -389,7 +390,8 @@ namespace ClangSharp.JNI.JNIGlue
                 }
             }
 
-            Write(")");
+            Write(") -> ");
+            Write(nativeLambda.ReturnType.AsRawString);
             WriteBlockStart();
         }
 

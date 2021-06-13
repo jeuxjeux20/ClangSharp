@@ -12,6 +12,7 @@ namespace ClangSharp.Abstractions
         public string EscapedName { get; set; }
         public string NativeType { get; set; }
         public string NativeInheritance { get; set; }
+        public bool IsComplete { get; set; }
         public StructLayoutAttribute Layout { get; set; }
         public Guid? Uuid { get; set; }
         public StructFlags Flags { get; set; }

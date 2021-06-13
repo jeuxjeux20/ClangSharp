@@ -373,7 +373,7 @@ namespace ClangSharp
             var desc = new FieldDesc
             {
                 AccessSpecifier = accessSpecifier,
-                NativeCanonicalType = TypeDesc.Create(type.CanonicalType),
+                NativeCanonicalType = TypeDesc.Create(type.CanonicalType, type),
                 NativeTypeName = nativeTypeName,
                 EscapedName = escapedName,
                 Offset = offset,
@@ -475,7 +475,7 @@ namespace ClangSharp
             {
                 AccessSpecifier = accessSppecifier,
                 NativeTypeName = nativeTypeName,
-                CanonicalNativeType = TypeDesc.Create(type.CanonicalType),
+                CanonicalNativeType = TypeDesc.Create(type.CanonicalType, type),
                 EscapedName = escapedName,
                 EntryPoint = entryPoint,
                 CallingConvention = callingConventionName,
@@ -505,7 +505,7 @@ namespace ClangSharp
             _outputBuilder.BeginFunctionOrDelegate(in desc, ref _isMethodClassUnsafe);
 
             var needsReturnFixup = isVirtual && NeedsReturnFixup(cxxMethodDecl);
-            
+
             if ((functionDecl is not CXXConstructorDecl) || (_config.OutputMode == PInvokeGeneratorOutputMode.Xml))
             {
                 _outputBuilder.WriteReturnType(needsReturnFixup ? $"{returnTypeName}*" : returnTypeName);
@@ -959,7 +959,7 @@ namespace ClangSharp
                     Name = escapedName,
                     Type = typeName,
                     NativeTypeName = nativeTypeName,
-                    CanonicalNativeType = TypeDesc.Create(type.CanonicalType),
+                    CanonicalNativeType = TypeDesc.Create(type.CanonicalType, type),
                     CppAttributes = _config.GenerateCppAttributes
                         ? parmVarDecl.Attrs.Select(x => EscapeString(x.Spelling))
                         : null,
@@ -1007,7 +1007,7 @@ namespace ClangSharp
                     Name = escapedName,
                     Type = typeName,
                     NativeTypeName = nativeTypeName,
-                    CanonicalNativeType = TypeDesc.Create(type.CanonicalType),
+                    CanonicalNativeType = TypeDesc.Create(type.CanonicalType, type),
                     CppAttributes = _config.GenerateCppAttributes
                         ? parmVarDecl.Attrs.Select(x => EscapeString(x.Spelling))
                         : null,
@@ -1168,6 +1168,7 @@ namespace ClangSharp
                     AccessSpecifier = GetAccessSpecifier(recordDecl),
                     EscapedName = escapedName,
                     IsUnsafe = IsUnsafe(recordDecl),
+                    IsComplete = recordDecl.IsCompleteDefinition,
                     HasVtbl = hasVtbl,
                     Layout = layout,
                     Uuid = nullableUuid,
@@ -2225,6 +2226,7 @@ namespace ClangSharp
                     CustomAttrGeneratorData = (name, this),
                     EscapedName = escapedName,
                     IsUnsafe = isUnsafeElementType,
+                    IsComplete = recordDecl.IsCompleteDefinition,
                     Layout = layout,
                     WriteCustomAttrs = static _ => {},
                     Location = constantArray.Location
@@ -2282,7 +2284,7 @@ namespace ClangSharp
                     {
                         AccessSpecifier = accessSpecifier,
                         NativeTypeName = null,
-                        NativeCanonicalType = TypeDesc.Create(type.CanonicalType),
+                        NativeCanonicalType = TypeDesc.Create(type.CanonicalType, type),
                         EscapedName = fieldName,
                         Offset = null,
                         NeedsNewKeyword = false,
@@ -2469,7 +2471,7 @@ namespace ClangSharp
                         CallingConvention = callingConventionName,
                         CustomAttrGeneratorData = (name, this),
                         EscapedName = escapedName,
-                        CanonicalNativeType = TypeDesc.Create(functionProtoType.CanonicalType),
+                        CanonicalNativeType = TypeDesc.Create(functionProtoType.CanonicalType, functionProtoType),
                         IsVirtual = true, // such that it outputs as a delegate
                         IsUnsafe = IsUnsafe(typedefDecl, functionProtoType),
                         NativeTypeName = nativeTypeName,

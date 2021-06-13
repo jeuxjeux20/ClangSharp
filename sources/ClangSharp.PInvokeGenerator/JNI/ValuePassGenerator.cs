@@ -19,23 +19,13 @@ namespace ClangSharp.JNI
         }
 
         public VariableToGenerate ReturnTypeVariable { get; set; }
-        public SingleVariableValuePass ReturnTypePass { get; set; }
+        public StandaloneValuePass ReturnTypePass { get; set; }
 
-        public List<VariableToGenerate> ParametersVariables { get; } = new();
-        public List<ValuePass> ParametersPasses { get; } = new();
+        public List<VariableToGenerate> ParameterVariables { get; } = new();
+        public List<ValuePass> ParameterPasses { get; } = new();
 
-        public GeneratedReturnTypes GeneratedReturnTypes
-            => GeneratedReturnTypes.FromVariable(ReturnTypeVariable);
-
-        public GeneratedParameters GeneratedParameters
-        {
-            get
-            {
-                var value = new GeneratedParameters();
-                value.AddAllVariables(ParametersVariables);
-                return value;
-            }
-        }
+        public GeneratedReturnTypes GeneratedReturnTypes => new(ReturnTypeVariable);
+        public GeneratedParameters GeneratedParameters => new(ParameterVariables);
 
         public void ConsumeFunctionParameters(IEnumerable<MethodParameter<TypeDesc>> parameters,
             string methodName,
@@ -51,7 +41,7 @@ namespace ClangSharp.JNI
                     if (IsEligibleFunctionPointerContext(parameter.Type))
                     {
                         ConsumeFunctionPointerParameter(
-                            prevFunctionPointerParameter, methodName, container);
+                            prevFunctionPointerParameter, methodName);
                         pendingSupportedFunctionPointer = null;
                         continue;
                     }
@@ -118,24 +108,23 @@ namespace ClangSharp.JNI
                     throw new InvalidOperationException("Cannot have a void parameter.");
                 }
 
-                ParametersPasses.Add(mainPass);
-                ParametersVariables.Add(mainVariable);
+                ParameterPasses.Add(mainPass);
+                ParameterVariables.Add(mainVariable);
             }
             else
             {
-                if (mainPass is not null and not SingleVariableValuePass)
+                if (mainPass is not null and not StandaloneValuePass)
                 {
-                    throw new InvalidOperationException("A SingleVariableValuePass is required in a return type.");
+                    throw new InvalidOperationException("A StandaloneValuePass is required in a return type.");
                 }
 
                 ReturnTypeVariable = mainVariable;
-                ReturnTypePass = (SingleVariableValuePass)mainPass;
+                ReturnTypePass = (StandaloneValuePass)mainPass;
             }
 
             ValuePass PassVoid()
             {
-                mainVariable =
-                    VariableToGenerate.IdenticalJavaTypes("voidRet", JniType.Void, JavaType.Void);
+                mainVariable = VariableToGenerate.IdenticalJavaTypes("voidRet", JniType.Void, JavaType.Void);
                 return null;
             }
 
@@ -159,12 +148,12 @@ namespace ClangSharp.JNI
 
                     var deletionEnumValueName = valueName + "DeletionBehaviour";
 
-                    ParametersVariables.Add(new VariableToGenerate(deletionEnumValueName,
+                    ParameterVariables.Add(new VariableToGenerate(deletionEnumValueName,
                         JniType.JBoolean,
                         JavaType.Boolean,
                         FumoCementTypes.StringDeletionBehaviour));
 
-                    ParametersPasses.Add(new PassStringDeletionEnumAsBool(deletionEnumValueName));
+                    ParameterPasses.Add(new PassStringDeletionEnumAsBool(deletionEnumValueName));
 
                     return new PassStringAsJByteArrayToCharPtr(deletionEnumValueName, valueName);
                 }
@@ -176,7 +165,7 @@ namespace ClangSharp.JNI
             {
                 mainVariable = VariableToGenerate.IdenticalJavaTypes(valueName,
                     JniType.JLong,
-                    JavaType.Long.WithAddedAnnotations($"@Pointer(\"{pointerType.AsString}\")"));
+                    JavaType.Long.WithAddedAnnotations($"@Pointer(\"{pointerType.AsRawString}\")"));
 
                 return new PassPointerAsJLongToPtr(pointerType, valueName);
             }
@@ -243,8 +232,7 @@ namespace ClangSharp.JNI
 
             ValuePass PassStruct(RecordTypeDesc recordType)
             {
-                // TODO: Do not hard-code "Struct"
-                var javaStructName = recordType.AsString + "Struct";
+                var javaStructName = JniGenerationPlan.StructTypeName(recordType.Name);
 
                 mainVariable = new VariableToGenerate(valueName,
                     JniType.JLong,
@@ -264,7 +252,7 @@ namespace ClangSharp.JNI
                 const string MagicConstantAnnotation = "@org.intellij.lang.annotations.MagicConstant";
 
                 var javaEnumName = JavaConventions.EscapeName(enumType.Name); // TODO: DRY this with a hairdryer
-                var fullyQualifiedJavaEnumName = $"{JavaConventions.ContainerClassName}.{javaEnumName}.class";
+                var fullyQualifiedJavaEnumName = $"{_generationPlan.ContainerClass}.{javaEnumName}.class";
 
                 mainVariable = VariableToGenerate.IdenticalJavaTypes(valueName,
                     JniType.JLong,
@@ -280,8 +268,8 @@ namespace ClangSharp.JNI
         {
             var type = JavaType.Long.WithAddedAnnotations("@Pointer");
 
-            ParametersPasses.Add(new PassStructHandleAsJLong());
-            ParametersVariables.Add(new VariableToGenerate("handle",
+            ParameterPasses.Add(new PassStructHandleAsJLong());
+            ParameterVariables.Add(new VariableToGenerate("handle",
                 new JniType(JniType.JLong),
                 type,
                 null));
@@ -289,13 +277,11 @@ namespace ClangSharp.JNI
 
         private void ConsumeFunctionPointerParameter(
             MethodParameter<TypeDesc> pointerParameter,
-            string methodName,
-            string container)
+            string methodName)
         {
             var functionPointerType = (FunctionProtoTypeDesc)((PointerTypeDesc)pointerParameter.Type).PointeeType;
-            var callbackInterface = $"Callback_{container}_{methodName}_{pointerParameter.Name}";
-            var callbackInterfaceType =
-                _generationPlan.NestedTypeInContainer($"Callback_{container}_{methodName}_{pointerParameter.Name}");
+            var callbackInterface = $"Callback_{methodName}_{pointerParameter.Name}";
+            var callbackInterfaceType = _generationPlan.NestedTypeInContainer(callbackInterface);
 
             // Let's add the callback interface and its callbackCall function
             var callbackGenerationSet = CreateCallbackGenSet();
@@ -303,21 +289,21 @@ namespace ClangSharp.JNI
                 new JavaCallbackGenerationInfo(callbackInterface, callbackGenerationSet));
 
             // Then add the function pointer parameter used to actually call Java from C.
-            ParametersVariables.Add(new VariableToGenerate(pointerParameter.Name,
+            ParameterVariables.Add(new VariableToGenerate(pointerParameter.Name,
                 JniType.JLong,
                 JavaType.Long,
                 FumoCementTypes.FunctionPointer(callbackInterface)));
-            ParametersPasses.Add(new PassFunctionPointerAsContextPtr(pointerParameter.Name));
+            ParameterPasses.Add(new PassFunctionPointerAsContextPtr(pointerParameter.Name));
 
             // Native side now, this is the fun part!
-            var callbackCallClass = callbackInterfaceType.JniClass;
+            var callbackCallClass = callbackInterfaceType.FullJniClass;
             var callbackCallMethod = callbackGenerationSet.CallbackCallMethod.Name;
             var callbackCallSignature = callbackGenerationSet.CallbackCallMethod.JniSignature;
 
-            ParametersPasses.Add(
+            ParameterPasses.Add(
                 new PassFunctionPointerProxyLambda(pointerParameter.Name, CreateProxyGenSet(),
                     callbackCallClass, callbackCallMethod, callbackCallSignature));
-            ParametersPasses.Add(new PassContextPtrAsVoidPtr(pointerParameter.Name));
+            ParameterPasses.Add(new PassContextPtrAsVoidPtr(pointerParameter.Name));
 
             JavaCallbackGenerationSet CreateCallbackGenSet()
             {
@@ -329,7 +315,7 @@ namespace ClangSharp.JNI
                     .Select((x, i) => new MethodParameter<TypeDesc>(x, $"param{i}"))
                     .ToList();
 
-                generator.ParametersVariables.Add(new VariableToGenerate(pointerParameter.Name,
+                generator.ParameterVariables.Add(new VariableToGenerate(pointerParameter.Name,
                     null, callbackInterfaceType, null)
                 );
 
@@ -348,13 +334,13 @@ namespace ClangSharp.JNI
                         false,
                         false),
                     generator.ReturnTypePass,
-                    generator.ParametersPasses);
+                    generator.ParameterPasses);
             }
 
             FunctionPointerProxyGenerationSet CreateProxyGenSet()
             {
-                const string ContextParameter = "func__rawContext";
-                const string CastedContextVariable = "func__actualContext";
+                const string ContextParameter = "func$$rawContext";
+                const string CastedContextVariable = "func$$actualContext";
 
                 // This method will call the callbackCall method with the required values.
                 var lastParamIndex = functionPointerType.Parameters.Count - 1;
@@ -369,7 +355,7 @@ namespace ClangSharp.JNI
                 // We won't pass the void* context to java!
                 var passedParameters = nativeParameters.SkipLast(1).ToArray();
 
-                generator.ParametersPasses.Add(new PassCallbackObject(CastedContextVariable));
+                generator.ParameterPasses.Add(new PassCallbackObject(CastedContextVariable));
                 generator.Consume(functionPointerType.ReturnType, "returnValue",
                     ValuePassContext.MethodReturnValue);
                 generator.ConsumeFunctionParameters(passedParameters, methodName, "method");
@@ -380,7 +366,7 @@ namespace ClangSharp.JNI
                         nativeParameters),
                     callbackGenerationSet.CallbackCallMethod,
                     generator.ReturnTypePass,
-                    generator.ParametersPasses,
+                    generator.ParameterPasses,
                     CastedContextVariable);
             }
         }
@@ -414,51 +400,48 @@ namespace ClangSharp.JNI
 
     internal class GeneratedParameters
     {
-        public List<MethodParameter<JniType>> Native { get; } = new();
-        public List<MethodParameter<JavaType>> InternalJavaNative { get; } = new();
-        public List<MethodParameter<JavaType>> PublicJava { get; } = new();
+        private readonly List<MethodParameter<JniType>> _native = new();
+        private readonly List<MethodParameter<JavaType>> _internalJavaNative = new();
+        private readonly List<MethodParameter<JavaType>> _publicJava = new();
 
-        public void AddFromVariable(VariableToGenerate variable)
+        public IReadOnlyList<MethodParameter<JniType>> Native => _native;
+        public IReadOnlyList<MethodParameter<JavaType>> InternalJavaNative => _internalJavaNative;
+        public IReadOnlyList<MethodParameter<JavaType>> PublicJava => _publicJava;
+
+        public GeneratedParameters(IEnumerable<VariableToGenerate> parameterVariables)
         {
-            if (variable.NativeType is { } actualNativeType)
+            foreach (var variable in parameterVariables)
             {
-                Native.Add(new(actualNativeType, variable.Name));
-            }
+                if (variable.NativeType is { } actualNativeType)
+                {
+                    _native.Add(new(actualNativeType, variable.Name));
+                }
 
-            if (variable.InternalJavaNative is { } actualInternalJavaNative)
-            {
-                InternalJavaNative.Add(new(actualInternalJavaNative, variable.Name));
-            }
+                if (variable.InternalJavaNative is { } actualInternalJavaNative)
+                {
+                    _internalJavaNative.Add(new(actualInternalJavaNative, variable.Name));
+                }
 
-            if (variable.PublicJava is { } actualPublicJava)
-            {
-                PublicJava.Add(new(actualPublicJava, variable.Name));
-            }
-        }
-
-        public void AddAllVariables(IEnumerable<VariableToGenerate> variables)
-        {
-            foreach (var variable in variables)
-            {
-                AddFromVariable(variable);
+                if (variable.PublicJava is { } actualPublicJava)
+                {
+                    _publicJava.Add(new(actualPublicJava, variable.Name));
+                }
             }
         }
     }
 
     internal class GeneratedReturnTypes
     {
-        public static GeneratedReturnTypes FromVariable(VariableToGenerate variable)
+        public GeneratedReturnTypes(VariableToGenerate variable)
         {
-            return new() {
-                Native = variable?.NativeType ?? JniType.Void,
-                InternalJavaNative = variable?.InternalJavaNative ?? JavaType.Void,
-                PublicJava = variable?.PublicJava ?? JavaType.Void
-            };
+            Native = variable?.NativeType ?? JniType.Void;
+            InternalJavaNative = variable?.InternalJavaNative ?? JavaType.Void;
+            PublicJava = variable?.PublicJava ?? JavaType.Void;
         }
 
-        public JniType Native { get; set; }
-        public JavaType InternalJavaNative { get; set; }
-        public JavaType PublicJava { get; set; }
+        public JniType Native { get; }
+        public JavaType InternalJavaNative { get; }
+        public JavaType PublicJava { get; }
     }
 
     internal enum ValuePassContext

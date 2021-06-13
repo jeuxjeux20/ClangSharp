@@ -117,20 +117,22 @@ namespace ClangSharp.JNI.Java
             Repr = Package + "." + Name +
                    (_genericParameters.Length > 0 ? "<" + string.Join(", ", _genericParameters) + ">" : "");
 
-            JniClass = $"{JavaConventions.JniPackageName(Package)}/{Name.Replace(".", "$")}";
-            JniTypeSignature = $"L{JniClass};";
+            RawName = Name.Replace(".", "$");
+            FullJniClass = $"{JavaConventions.JniPackageName(Package)}/{RawName}";
+            JniTypeSignature = $"L{FullJniClass};";
         }
 
-        private ObjectJavaType(string package, string name, string fullyQualifiedName,
+        private ObjectJavaType(string package, string name, string rawName, string fullyQualifiedName,
             string jniTypeSignature,
-            string jniClass,
+            string fullJniClass,
             string[] genericParameters,
             IEnumerable<string> annotations) : base(annotations)
         {
             Package = package;
             Name = name;
+            RawName = rawName;
             Repr = fullyQualifiedName;
-            JniClass = jniClass;
+            FullJniClass = fullJniClass;
             JniTypeSignature = jniTypeSignature;
             _genericParameters = genericParameters;
         }
@@ -139,15 +141,16 @@ namespace ClangSharp.JNI.Java
         protected override string Repr { get; }
         public override string JniTypeSignature { get; }
 
-        public string JniClass { get; }
+        public string FullJniClass { get; }
 
         public string Package { get; }
         public string Name { get; }
+        public string RawName { get; }
 
         public IReadOnlyList<string> GenericParameters => _genericParameters;
 
         public override ObjectJavaType WithAddedAnnotations(params string[] annotations) =>
-            new(Package, Name, Repr, JniTypeSignature, JniClass, _genericParameters,
+            new(Package, Name, RawName, Repr, JniTypeSignature, FullJniClass, _genericParameters,
                 Annotations.Concat(annotations));
     }
 
