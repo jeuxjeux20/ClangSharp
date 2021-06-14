@@ -29,6 +29,11 @@ namespace ClangSharp.JNI.Java
                 GenerateStruct(@struct);
             }
 
+            foreach (var @enum in CurrentGenerationPlan.Enums)
+            {
+                GenerateEnum(@enum);
+            }
+
             foreach (var callback in CurrentGenerationPlan.JavaCallbacks)
             {
                 GenerateCallback(callback);
@@ -38,11 +43,77 @@ namespace ClangSharp.JNI.Java
             {
                 GenerateMethod(method);
             }
+        }
 
-            foreach (var @enum in CurrentGenerationPlan.Enums)
+        private void GenerateStruct(StructGenerationInfo @struct)
+        {
+            var className = @struct.JavaName;
+
+            WriteIndentedLine($"public static final class {className} extends NativeStruct");
+            WriteBlockStart();
+
+            WriteIndentedLine($"public static native long {@struct.AllocateStructMethodName}();");
+            WriteIndentedLine($"public static native void {@struct.DestroyStructMethodName}(long handle);");
+            WriteNewLine();
+            WriteIndentedLine($"public static native void {@struct.OverwriteMethodName}(" +
+                              $"@Pointer(\"{@struct.NativeName}*\") long targetHandle, " +
+                              $"@Pointer(\"{@struct.NativeName}*\") long dataHandle);");
+
+            WriteIndentedLine($"private static final NativeObjectTracker<{className}> ownedTracker = " +
+                              $"new NativeObjectTracker<>({className}::new, NativeObjectTracker.Target.OWNED_OBJECTS);");
+            WriteIndentedLine($"private static final NativeObjectTracker<{className}> unownedTracker = " +
+                              $"new NativeObjectTracker<>({className}::new, NativeObjectTracker.Target.UNOWNED_OBJECTS);");
+            WriteNewLine();
+
+            WriteIndentedLine($"public static {className} createTracked()");
+            WriteBlockStart();
+            WriteIndentedLine("return ownedTracker.getOrCreate(allocateStruct());");
+            WriteBlockEnd();
+            WriteNewLine();
+
+            WriteIndentedLine($"public static {className} getTrackedAndOwned(long handle)");
+            WriteBlockStart();
+            WriteIndentedLine("return ownedTracker.getOrCreate(handle);");
+            WriteBlockEnd();
+            WriteNewLine();
+
+            WriteIndentedLine($"public static {className} getTrackedAndUnowned(long handle)");
+            WriteBlockStart();
+            WriteIndentedLine("return unownedTracker.getOrCreate(handle);");
+            WriteBlockEnd();
+            WriteNewLine();
+
+            WriteIndentedLine($"public {className}()");
+            WriteBlockStart();
+            WriteIndentedLine($"super(allocateStruct(), true, {className}::destroyStruct);");
+            WriteBlockEnd();
+            WriteNewLine();
+
+            WriteIndentedLine($"public {className}(long handle, boolean isOwned)");
+            WriteBlockStart();
+            WriteIndentedLine($"super(handle, isOwned, {className}::destroyStruct);");
+            WriteBlockEnd();
+
+            WriteIndentedLine($"public {className}(long handle, boolean isOwned, DisposalMethod disposalMethod)");
+            WriteBlockStart();
+            WriteIndentedLine($"super(handle, isOwned, disposalMethod, {className}::destroyStruct);");
+            WriteBlockEnd();
+            WriteNewLine();
+
+            WriteIndentedLine($"public void overwrite(@Pointer(\"{@struct.NativeName}*\") long dataHandle)");
+            WriteBlockStart();
+            WriteIndentedLine("overwrite(getHandle(), dataHandle);");
+            WriteBlockEnd();
+
+            foreach (var field in @struct.Fields)
             {
-                GenerateEnum(@enum);
+                WriteNewLine();
+
+                WriteStructFieldGetter(field);
+                WriteStructFieldSetter(field);
             }
+
+            WriteBlockEnd();
         }
 
         private void GenerateEnum(EnumGenerationInfo @enum)
@@ -52,7 +123,7 @@ namespace ClangSharp.JNI.Java
 
             foreach (var enumConstant in @enum.Constants)
             {
-                var type = enumConstant.IsSigned ? "long" : "@Unsigned long";
+                var type = enumConstant.IsSigned ? "int" : "@Unsigned int";
                 var value = enumConstant.SignedValue ??
                             (long) (enumConstant.UnsignedValue ??
                                     throw new InvalidOperationException("Both values are null."));
@@ -119,67 +190,57 @@ namespace ClangSharp.JNI.Java
             WriteBlockEnd();
         }
 
-        private void GenerateStruct(StructGenerationInfo @struct)
+        private void GenerateMethod(MethodGenerationInfo method)
         {
-            var className = @struct.JavaName;
+            var generationSet = method.GenerationSet;
 
-            WriteIndentedLine($"public static final class {className} extends NativeStruct");
-            WriteBlockStart();
+            var nativeMethod = generationSet.InternalJavaNativeMethod;
+            var publicMethod = generationSet.PublicJavaMethod;
+            var parameterPasses = generationSet.JavaToJniParameterPasses;
 
-            WriteIndentedLine("public static native long allocateStruct();");
-            WriteIndentedLine("public static native void destroyStruct(long handle);");
-            WriteNewLine();
+            WriteBodylessMethod(nativeMethod, "public");
 
-            WriteIndentedLine($"private static final NativeObjectTracker<{className}> ownedTracker = " +
-                              $"new NativeObjectTracker<>({className}::new, NativeObjectTracker.Target.OWNED_OBJECTS);");
-            WriteIndentedLine($"private static final NativeObjectTracker<{className}> unownedTracker = " +
-                              $"new NativeObjectTracker<>({className}::new, NativeObjectTracker.Target.UNOWNED_OBJECTS);");
-            WriteNewLine();
+            BeginFullJavaMethod(publicMethod);
 
-            WriteIndentedLine($"public static {className} createTracked()");
-            WriteBlockStart();
-            WriteIndentedLine("return ownedTracker.getOrCreate(allocateStruct());");
-            WriteBlockEnd();
-            WriteNewLine();
-
-            WriteIndentedLine($"public static {className} getTrackedAndOwned(long handle)");
-            WriteBlockStart();
-            WriteIndentedLine("return ownedTracker.getOrCreate(handle);");
-            WriteBlockEnd();
-            WriteNewLine();
-
-            WriteIndentedLine($"public static {className} getTrackedAndUnowned(long handle)");
-            WriteBlockStart();
-            WriteIndentedLine("return unownedTracker.getOrCreate(handle);");
-            WriteBlockEnd();
-            WriteNewLine();
-
-            WriteIndentedLine($"public {className}()");
-            WriteBlockStart();
-            WriteIndentedLine($"super(allocateStruct(), true, {className}::destroyStruct);");
-            WriteBlockEnd();
-            WriteNewLine();
-
-            WriteIndentedLine($"public {className}(long handle, boolean isOwned)");
-            WriteBlockStart();
-            WriteIndentedLine($"super(handle, isOwned, {className}::destroyStruct);");
-            WriteBlockEnd();
-
-            foreach (var field in @struct.Fields)
+            for (var i = 0; i < parameterPasses.Count; i++)
             {
-                WriteNewLine();
+                var parameterPass = parameterPasses[i];
+                var parameterType = nativeMethod.Parameters[i].Type;
 
-                WriteStructFieldGetter(field);
-                WriteStructFieldSetter(field);
+                WriteIndentedLine($"{parameterType.AsString} {parameterPass.IntermediateVariableName} = ");
+                Write(PassToJni(parameterPass));
+                Write(';');
             }
 
-            WriteBlockEnd();
+            var returnPass = generationSet.JavaToJniReturnValuePass;
+            var hasReturnValue = returnPass != null;
+
+            WriteNewLine();
+            WriteIndentation();
+            if (hasReturnValue)
+            {
+                Write($"{nativeMethod.ReturnType.AsString} {returnPass.ValueToPass} = ");
+            }
+
+            // Call the native method.
+            Write(nativeMethod.Name);
+            WriteMethodArgumentsFromIntermediate(parameterPasses);
+            Write(";");
+
+            if (hasReturnValue)
+            {
+                WriteIndentedLine("return ");
+                Write(PassToJava(returnPass));
+                Write(";");
+            }
+
+            EndFullJavaMethod();
         }
 
         private string PassToJava(ValuePass pass)
         {
             return pass switch {
-                PassPrimitive or PassPointerAsJLongToPtr or PassEnumLongAsJLongToEnum
+                PassPrimitive or PassPointerAsJLongToPtr or PassEnumValueAsValueTypeToEnum
                     => ((StandaloneValuePass)pass).ValueToPass,
 
                 PassNestedStructAsJLongPointerToStructPtr passStruct
@@ -203,7 +264,7 @@ namespace ClangSharp.JNI.Java
             return pass switch {
                 PassPrimitive or
                     PassPointerAsJLongToPtr or
-                    PassEnumLongAsJLongToEnum
+                    PassEnumValueAsValueTypeToEnum
                     => ((StandaloneValuePass)pass).ValueToPass,
 
                 PassNestedStructAsJLongPointerToStructPtr or
@@ -284,53 +345,6 @@ namespace ClangSharp.JNI.Java
             WriteIndentedLine($"{nativeMethod.Name}");
             WriteMethodArgumentsFromIntermediate(parameterPasses);
             Write(";");
-
-            EndFullJavaMethod();
-        }
-
-        private void GenerateMethod(MethodGenerationInfo method)
-        {
-            var generationSet = method.GenerationSet;
-
-            var nativeMethod = generationSet.InternalJavaNativeMethod;
-            var publicMethod = generationSet.PublicJavaMethod;
-            var parameterPasses = generationSet.JavaToJniParameterPasses;
-
-            WriteBodylessMethod(nativeMethod, "private");
-
-            BeginFullJavaMethod(publicMethod);
-
-            for (var i = 0; i < parameterPasses.Count; i++)
-            {
-                var parameterPass = parameterPasses[i];
-                var parameterType = nativeMethod.Parameters[i].Type;
-
-                WriteIndentedLine($"{parameterType.AsString} {parameterPass.IntermediateVariableName} = ");
-                Write(PassToJni(parameterPass));
-                Write(';');
-            }
-
-            var returnPass = generationSet.JavaToJniReturnValuePass;
-            var hasReturnValue = returnPass != null;
-
-            WriteNewLine();
-            WriteIndentation();
-            if (hasReturnValue)
-            {
-                Write($"{nativeMethod.ReturnType.AsString} {returnPass.ValueToPass} = ");
-            }
-
-            // Call the native method.
-            Write(nativeMethod.Name);
-            WriteMethodArgumentsFromIntermediate(parameterPasses);
-            Write(";");
-
-            if (hasReturnValue)
-            {
-                WriteIndentedLine("return ");
-                Write(PassToJava(returnPass));
-                Write(";");
-            }
 
             EndFullJavaMethod();
         }

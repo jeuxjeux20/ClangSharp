@@ -27,9 +27,7 @@ namespace ClangSharp.JNI
         public GeneratedReturnTypes GeneratedReturnTypes => new(ReturnTypeVariable);
         public GeneratedParameters GeneratedParameters => new(ParameterVariables);
 
-        public void ConsumeFunctionParameters(IEnumerable<MethodParameter<TypeDesc>> parameters,
-            string methodName,
-            string container)
+        public void ConsumeFunctionParameters(IEnumerable<MethodParameter<TypeDesc>> parameters, string methodName)
         {
             const ValuePassContext Context = ValuePassContext.MethodParameter;
 
@@ -255,12 +253,12 @@ namespace ClangSharp.JNI
                 var fullyQualifiedJavaEnumName = $"{_generationPlan.ContainerClass}.{javaEnumName}.class";
 
                 mainVariable = VariableToGenerate.IdenticalJavaTypes(valueName,
-                    JniType.JLong,
-                    JavaType.Long
+                    JniType.JInt,
+                    JavaType.Int
                         .WithAddedAnnotations(
                             $"{MagicConstantAnnotation}(flagsFromClass = {fullyQualifiedJavaEnumName})"));
 
-                return new PassEnumLongAsJLongToEnum(enumType, valueName);
+                return new PassEnumValueAsValueTypeToEnum(enumType, valueName);
             }
         }
 
@@ -321,7 +319,7 @@ namespace ClangSharp.JNI
 
                 generator.Consume(functionPointerType.ReturnType, "returnValue",
                     ValuePassContext.MethodReturnValue);
-                generator.ConsumeFunctionParameters(parameters, CallbackCall, callbackInterface);
+                generator.ConsumeFunctionParameters(parameters, CallbackCall);
 
                 return new JavaCallbackGenerationSet(
                     new FullJavaMethod(CallbackCall,
@@ -358,7 +356,7 @@ namespace ClangSharp.JNI
                 generator.ParameterPasses.Add(new PassCallbackObject(CastedContextVariable));
                 generator.Consume(functionPointerType.ReturnType, "returnValue",
                     ValuePassContext.MethodReturnValue);
-                generator.ConsumeFunctionParameters(passedParameters, methodName, "method");
+                generator.ConsumeFunctionParameters(passedParameters, methodName);
 
                 return new FunctionPointerProxyGenerationSet(
                     new NativeMethod("__lambda",

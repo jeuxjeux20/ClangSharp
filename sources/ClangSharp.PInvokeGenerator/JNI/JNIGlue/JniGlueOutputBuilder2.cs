@@ -29,6 +29,7 @@ namespace ClangSharp.JNI.JNIGlue
 
                 WriteAllocateStructMethod(@struct);
                 WriteDestroyStructMethod(@struct);
+                WriteOverwriteMethod(@struct);
 
                 foreach (var structField in @struct.Fields)
                 {
@@ -60,13 +61,30 @@ namespace ClangSharp.JNI.JNIGlue
 
         private void WriteDestroyStructMethod(StructGenerationInfo @struct)
         {
-            BeginJniMethod("void",
+            BeginJniMethod(JniType.Void,
                 @struct.JavaType.RawName,
                 @struct.DestroyStructMethodName,
                 true,
                 new MethodParameter<JniType>[] { new(JniType.JLong, "handle") });
 
             WriteIndentedLine($"delete FumoCement::toNativePointer<{@struct.NativeName}>(handle);");
+
+            EndJniMethod();
+        }
+
+        private void WriteOverwriteMethod(StructGenerationInfo @struct)
+        {
+            BeginJniMethod(JniType.Void,
+                @struct.JavaType.RawName,
+                @struct.OverwriteMethodName,
+                true,
+                new MethodParameter<JniType>[] {
+                    new(JniType.JLong, "targetHandle"),
+                    new(JniType.JLong, "dataHandle")
+                });
+
+            WriteIndentedLine($"*FumoCement::toNativePointer<{@struct.NativeName}>(targetHandle) = " +
+                              $"*FumoCement::toNativePointer<{@struct.NativeName}>(dataHandle);");
 
             EndJniMethod();
         }
@@ -269,7 +287,7 @@ namespace ClangSharp.JNI.JNIGlue
                 PassStructAsJLongPointerToStructCopy passStruct
                     => $"FumoCement::toJavaPointer(new {passStruct.Record.Name}({passStruct.ValueToPass}))",
 
-                PassEnumLongAsJLongToEnum passEnum
+                PassEnumValueAsValueTypeToEnum passEnum
                     => $"static_cast<long>({passEnum.ValueToPass})",
 
                 PassCallbackObject passCallbackObject
@@ -303,7 +321,7 @@ namespace ClangSharp.JNI.JNIGlue
                 PassStructAsJLongPointerToStructCopy passStruct
                     => $"*FumoCement::toNativePointer<{passStruct.Record.Name}>({passStruct.ValueToPass})",
 
-                PassEnumLongAsJLongToEnum passEnum
+                PassEnumValueAsValueTypeToEnum passEnum
                     => $"static_cast<{passEnum.EnumType.Name}>({passEnum.ValueToPass})",
 
                 PassContextPtrAsVoidPtr passContextPtr

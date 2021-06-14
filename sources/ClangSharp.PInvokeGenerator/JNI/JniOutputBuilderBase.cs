@@ -550,7 +550,7 @@ namespace ClangSharp.JNI
         private MethodGenerationSet CreateFieldGetterMethodGenerationSet(PreliminaryStructField field)
         {
             var publicMethodName = JavaConventions.Getter(field.Name, field.Type.AsString);
-            var nativeMethodName = publicMethodName + "Native";
+            var nativeMethodName = publicMethodName + "Raw";
 
             var generator = new ValuePassGenerator(CurrentGenerationPlan);
 
@@ -564,7 +564,7 @@ namespace ClangSharp.JNI
         private MethodGenerationSet CreateFieldSetterMethodGenerationSet(PreliminaryStructField field)
         {
             var publicMethodName = JavaConventions.Setter(field.Name);
-            var nativeMethodName = publicMethodName + "Native";
+            var nativeMethodName = publicMethodName + "Raw";
 
             var generator = new ValuePassGenerator(CurrentGenerationPlan);
 
@@ -578,12 +578,11 @@ namespace ClangSharp.JNI
         private MethodGenerationSet CreateFunctionMethodGenerationSet(in PreliminaryFunction function)
         {
             var publicMethodName = function.JavaName;
-            var nativeMethodName = publicMethodName + "Raw";
+            var nativeMethodName = publicMethodName + "$Raw";
 
             var generator = new ValuePassGenerator(CurrentGenerationPlan);
 
-            generator.ConsumeFunctionParameters(function.Parameters, publicMethodName,
-                CurrentGenerationPlan.ContainerClass);
+            generator.ConsumeFunctionParameters(function.Parameters, publicMethodName);
 
             generator.Consume(function.ReturnType, "returnValue", ValuePassContext.MethodReturnValue);
 
