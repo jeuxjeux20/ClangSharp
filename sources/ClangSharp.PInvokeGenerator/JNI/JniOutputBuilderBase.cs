@@ -549,7 +549,7 @@ namespace ClangSharp.JNI
 
         private MethodGenerationSet CreateFieldGetterMethodGenerationSet(PreliminaryStructField field)
         {
-            var publicMethodName = JavaConventions.Getter(field.Name, field.Type.AsString);
+            var publicMethodName = JavaConventions.Getter(field.EscapedName, field.Type.AsString);
             var nativeMethodName = publicMethodName + "Raw";
 
             var generator = new ValuePassGenerator(CurrentGenerationPlan);
@@ -563,7 +563,7 @@ namespace ClangSharp.JNI
 
         private MethodGenerationSet CreateFieldSetterMethodGenerationSet(PreliminaryStructField field)
         {
-            var publicMethodName = JavaConventions.Setter(field.Name);
+            var publicMethodName = JavaConventions.Setter(field.EscapedName);
             var nativeMethodName = publicMethodName + "Raw";
 
             var generator = new ValuePassGenerator(CurrentGenerationPlan);
@@ -627,10 +627,17 @@ namespace ClangSharp.JNI
             public PreliminaryStructField(string name, TypeDesc type)
             {
                 Name = name;
+                EscapedName = name == "handle" ? "handleField" : name;
                 Type = type;
             }
 
             public string Name { get; }
+
+            /// <summary>
+            /// The name for use as part of getter/setter methods
+            /// </summary>
+            public string EscapedName { get; }
+
             public TypeDesc Type { get; }
         }
 
