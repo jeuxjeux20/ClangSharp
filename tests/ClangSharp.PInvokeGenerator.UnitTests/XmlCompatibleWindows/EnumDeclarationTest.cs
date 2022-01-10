@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -7,7 +7,7 @@ namespace ClangSharp.UnitTests
 {
     public sealed class XmlCompatibleWindows_EnumDeclarationTest : EnumDeclarationTest
     {
-        public override Task BasicTest()
+        protected override Task BasicTestImpl()
         {
             var inputContents = @"enum MyEnum : int
 {
@@ -39,7 +39,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task BasicValueTest()
+        protected override Task BasicValueTestImpl()
         {
             var inputContents = @"enum MyEnum : int
 {
@@ -74,7 +74,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ExcludeTest()
+        protected override Task ExcludeTestImpl()
         {
             var inputContents = @"enum MyEnum : int
 {
@@ -90,7 +90,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents, excludedNames: excludedNames);
         }
 
-        public override Task ExplicitTypedTest(string nativeType, string expectedManagedType)
+        protected override Task ExplicitTypedTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"enum MyEnum : {nativeType}
 {{
@@ -122,7 +122,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ExplicitTypedWithNativeTypeNameTest(string nativeType, string expectedManagedType)
+        protected override Task ExplicitTypedWithNativeTypeNameTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"enum MyEnum : {nativeType}
 {{
@@ -154,7 +154,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task RemapTest()
+        protected override Task RemapTestImpl()
         {
             var inputContents = @"typedef enum _MyEnum : int
 {
@@ -187,7 +187,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents, remappedNames: remappedNames);
         }
 
-        public override Task WithAttributeTest()
+        protected override Task WithAttributeTestImpl()
         {
             var inputContents = @"enum MyEnum1 : int
 {
@@ -203,8 +203,8 @@ enum MyEnum2 : int
             var expectedOutputContents = @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes"" ?>
 <bindings>
   <namespace name=""ClangSharp.Test"">
-    <attribute>Flags</attribute>
     <enumeration name=""MyEnum1"" access=""public"">
+      <attribute>Flags</attribute>
       <type>int</type>
       <enumerator name=""MyEnum1_Value1"" access=""public"">
         <type primitive=""False"">int</type>
@@ -233,103 +233,7 @@ enum MyEnum2 : int
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents, withAttributes: withAttributes);
         }
 
-        public override Task WithAttributeStarTest()
-        {
-            var inputContents = @"enum MyEnum1 : int
-{
-    MyEnum1_Value1 = 1,
-};
-
-enum MyEnum2 : int
-{
-    MyEnum2_Value1 = 1,
-};
-";
-
-            var expectedOutputContents = @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes"" ?>
-<bindings>
-  <namespace name=""ClangSharp.Test"">
-    <attribute>Flags</attribute>
-    <enumeration name=""MyEnum1"" access=""public"">
-      <type>int</type>
-      <enumerator name=""MyEnum1_Value1"" access=""public"">
-        <type primitive=""False"">int</type>
-        <value>
-          <code>1</code>
-        </value>
-      </enumerator>
-    </enumeration>
-    <attribute>Flags</attribute>
-    <enumeration name=""MyEnum2"" access=""public"">
-      <type>int</type>
-      <enumerator name=""MyEnum2_Value1"" access=""public"">
-        <type primitive=""False"">int</type>
-        <value>
-          <code>1</code>
-        </value>
-      </enumerator>
-    </enumeration>
-  </namespace>
-</bindings>
-";
-
-            var withAttributes = new Dictionary<string, IReadOnlyList<string>>
-            {
-                ["*"] = new List<string>() { "Flags" }
-            };
-            return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents, withAttributes: withAttributes);
-        }
-
-        public override Task WithAttributeStarPlusTest()
-        {
-            var inputContents = @"enum MyEnum1 : int
-{
-    MyEnum1_Value1 = 1,
-};
-
-enum MyEnum2 : int
-{
-    MyEnum2_Value1 = 1,
-};
-";
-
-            var expectedOutputContents = @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes"" ?>
-<bindings>
-  <namespace name=""ClangSharp.Test"">
-    <attribute>Flags</attribute>
-    <enumeration name=""MyEnum1"" access=""public"">
-      <type>int</type>
-      <enumerator name=""MyEnum1_Value1"" access=""public"">
-        <type primitive=""False"">int</type>
-        <value>
-          <code>1</code>
-        </value>
-      </enumerator>
-    </enumeration>
-    <attribute>Flags</attribute>
-    <attribute>EditorBrowsable(EditorBrowsableState.Never)</attribute>
-    <enumeration name=""MyEnum2"" access=""public"">
-      <type>int</type>
-      <enumerator name=""MyEnum2_Value1"" access=""public"">
-        <type primitive=""False"">int</type>
-        <value>
-          <code>1</code>
-        </value>
-      </enumerator>
-    </enumeration>
-  </namespace>
-</bindings>
-";
-
-            var withAttributes = new Dictionary<string, IReadOnlyList<string>>
-            {
-                ["*"] = new List<string>() { "Flags" },
-                ["MyEnum2"] = new List<string>() { "EditorBrowsable(EditorBrowsableState.Never)" }
-            };
-            return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents, withAttributes: withAttributes);
-        }
-
-        public override Task WithNamespaceTest()
+        protected override Task WithNamespaceTestImpl()
         {
             var inputContents = @"enum MyEnum1 : int
 {
@@ -374,7 +278,7 @@ enum MyEnum2 : int
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents, withUsings: withNamespaces);
         }
 
-        public override Task WithNamespaceStarTest()
+        protected override Task WithNamespaceStarTestImpl()
         {
             var inputContents = @"enum MyEnum1 : int
 {
@@ -419,7 +323,7 @@ enum MyEnum2 : int
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents, withUsings: withNamespaces);
         }
 
-        public override Task WithNamespaceStarPlusTest()
+        protected override Task WithNamespaceStarPlusTestImpl()
         {
             var inputContents = @"enum MyEnum1 : int
 {
@@ -465,7 +369,7 @@ enum MyEnum2 : int
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents, withUsings: withNamespaces);
         }
 
-        public override Task WithCastToEnumType()
+        protected override Task WithCastToEnumTypeImpl()
         {
             var inputContents = @"enum MyEnum : int
 {
@@ -506,7 +410,7 @@ enum MyEnum2 : int
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task WithMultipleEnumsTest()
+        protected override Task WithMultipleEnumsTestImpl()
         {
             var inputContents = @"enum MyEnum1 : int
 {
@@ -554,7 +458,7 @@ enum MyEnum2 : int
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task WithImplicitConversionTest()
+        protected override Task WithImplicitConversionTestImpl()
         {
             var inputContents = @"enum MyEnum : int
 {
@@ -596,7 +500,7 @@ enum MyEnum2 : int
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task WithTypeTest()
+        protected override Task WithTypeTestImpl()
         {
             var inputContents = @"enum MyEnum : int
 {
@@ -631,7 +535,7 @@ enum MyEnum2 : int
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents, withTypes: withTypes);
         }
 
-        public override Task WithTypeAndImplicitConversionTest()
+        protected override Task WithTypeAndImplicitConversionTestImpl()
         {
             var inputContents = @"enum MyEnum : int
 {
@@ -670,7 +574,7 @@ enum MyEnum2 : int
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents, withTypes: withTypes);
         }
 
-        public override Task WithTypeStarTest()
+        protected override Task WithTypeStarTestImpl()
         {
             var inputContents = @"enum MyEnum1 : int
 {
@@ -709,7 +613,7 @@ enum MyEnum2 : int
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents, withTypes: withTypes);
         }
 
-        public override Task WithTypeStarOverrideTest()
+        protected override Task WithTypeStarOverrideTestImpl()
         {
             var inputContents = @"enum MyEnum1 : int
 {

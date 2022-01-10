@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Diagnostics;
 using System.Globalization;
@@ -17,70 +17,231 @@ namespace ClangSharp.CSharp
         public void WriteCastType(string targetTypeName) => Write(targetTypeName);
         public void EndInnerCast() => Write(')');
 
-        public void BeginUnchecked() => Write("unchecked");
+        public void BeginUnchecked()
+        {
+            Debug.Assert(!IsUncheckedContext);
+            Write("unchecked");
+            IsUncheckedContext = true;
+        }
         public void EndUnchecked()
         {
-            // nop, used only by XML
+            Debug.Assert(IsUncheckedContext);
+            IsUncheckedContext = false;
         }
 
-        public void BeginConstant(in ConstantDesc desc)
+        public void BeginValue(in ValueDesc desc)
         {
+            if (_config.GenerateDocIncludes && (desc.Kind == ValueKind.Enumerator))
+            {
+                WriteIndented("/// <include file='");
+                Write(desc.ParentName);
+                Write(".xml' path='doc/member[@name=\"");
+                Write(desc.ParentName);
+                Write('.');
+                Write(desc.EscapedName);
+                WriteLine("\"]/*' />");
+            }
+
             if (desc.NativeTypeName is not null)
             {
                 AddNativeTypeNameAttribute(desc.NativeTypeName);
             }
 
-            if (desc.Location is {} location)
+            if (desc.Location is { } location)
+            {
                 WriteSourceLocation(location, false);
+            }
+
+            desc.WriteCustomAttrs?.Invoke(desc.CustomAttrGeneratorData);
+
+            var isProperty = false;
+            var isExpressionBody = false;
+
+            if (desc.Kind == ValueKind.String)
+            {
+                isExpressionBody = true;
+            }
+            else if (desc.IsConstant)
+            {
+                if (_config.GenerateUnmanagedConstants && (desc.Kind != ValueKind.Enumerator))
+                {
+                    if (desc.IsCopy)
+                    {
+                        isExpressionBody = true;
+                    }
+                    else if (desc.Kind == ValueKind.Unmanaged)
+                    {
+                        isProperty = true;
+                    }
+                }
+            }
 
             WriteIndentation();
 
-            if ((desc.Kind & ConstantKind.PrimitiveConstant) != 0)
+            if (desc.Kind == ValueKind.Primitive)
             {
-                Write(desc.AccessSpecifier.AsString());
-                Write(" const ");
-                Write(desc.TypeName);
-                Write(' ');
-            }
-            else if ((desc.Kind & ConstantKind.NonPrimitiveConstant) != 0)
-            {
-                Write(desc.AccessSpecifier.AsString());
-                Write(" static ");
-                if ((desc.Kind & ConstantKind.ReadOnly) != 0)
+                Write(GetAccessSpecifierString(desc.AccessSpecifier, isNested: true));
+
+                if (desc.IsConstant)
                 {
-                    Write("readonly ");
+                    if (desc.IsCopy)
+                    {
+                        Write(" static ");
+
+                        if (!_config.GenerateUnmanagedConstants)
+                        {
+                            Write("readonly ");
+                        }
+                    }
+                    else
+                    {
+                        Write(" const ");
+                    }
+                }
+                else
+                {
+                    Write(" static ");
                 }
 
                 Write(desc.TypeName);
                 Write(' ');
             }
+            else if (desc.Kind == ValueKind.Unmanaged)
+            {
+                Write(GetAccessSpecifierString(desc.AccessSpecifier, isNested: true));
+                Write(" static ");
+
+                if (_config.GenerateUnmanagedConstants && desc.IsConstant)
+                {
+                    if (desc.IsArray)
+                    {
+                        Write("ReadOnlySpan<");
+                    }
+                    else
+                    {
+                        Write("ref readonly ");
+                    }
+
+                    Write(desc.TypeName);
+
+                    if (desc.IsArray)
+                    {
+                        Write('>');
+                    }
+                }
+                else
+                {
+                    if (desc.IsConstant)
+                    {
+                        Write("readonly ");
+                    }
+                    Write(desc.TypeName);
+                }
+
+                Write(' ');
+            }
+            else if (desc.Kind == ValueKind.String)
+            {
+                Write(GetAccessSpecifierString(desc.AccessSpecifier, isNested: true));
+                Write(" static ");
+                Write(desc.TypeName);
+                Write(' ');
+            }
 
             Write(desc.EscapedName);
-        }
 
-        public void BeginConstantValue(bool isGetOnlyProperty = false) => Write(isGetOnlyProperty ? " => " : " = ");
+            if (desc.HasInitializer)
+            {
+                if (isExpressionBody)
+                {
+                    Write(" => ");
+                }
+                else if (isProperty)
+                {
+                    WriteNewline();
+                    WriteBlockStart();
+                    BeginGetter(desc.IsConstant && _config.GenerateAggressiveInlining);
+                }
+                else
+                {
+                    Write(" = ");
+                }
+            }
+        }
 
         public void WriteConstantValue(long value) => Write(value);
         public void WriteConstantValue(ulong value) => Write(value);
 
-        public void EndConstantValue()
+        public void EndValue(in ValueDesc desc)
         {
-            // nop, used only by the XML backend
-        }
+            switch (desc.Kind)
+            {
+                case ValueKind.Primitive:
+                {
+                    WriteLine(';');
+                    break;
+                }
 
-        public void EndConstant(bool isConstant) => WriteLine(isConstant ? ';' : ',');
+                case ValueKind.Enumerator:
+                {
+                    WriteLine(',');
+
+                    if (_config.GenerateDocIncludes)
+                    {
+                        NeedsNewline = true;
+                    }
+                    break;
+                }
+
+                case ValueKind.Unmanaged:
+                {
+                    if (desc.IsConstant)
+                    {
+                        if (_config.GenerateUnmanagedConstants && !desc.IsCopy)
+                        {
+                            EndGetter();
+                            WriteBlockEnd();
+                        }
+                        else
+                        {
+                            WriteLine(';');
+                        }
+                    }
+                    break;
+                }
+
+                case ValueKind.String:
+                {
+                    WriteLine(';');
+                    break;
+                }
+            }
+        }
 
         public void BeginEnum(in EnumDesc desc)
         {
+            if (_config.GenerateDocIncludes)
+            {
+                WriteIndented("/// <include file='");
+                Write(desc.EscapedName);
+                Write(".xml' path='doc/member[@name=\"");
+                Write(desc.EscapedName);
+                WriteLine("\"]/*' />");
+            }
+
             if (desc.NativeType is not null)
             {
                 AddNativeTypeNameAttribute(desc.NativeType);
             }
 
             if (desc.Location is {} location)
+            {
                 WriteSourceLocation(location, false);
+            }
 
-            WriteIndented(desc.AccessSpecifier.AsString());
+            desc.WriteCustomAttrs?.Invoke(desc.CustomAttrGeneratorData);
+
+            WriteIndented(GetAccessSpecifierString(desc.AccessSpecifier, desc.IsNested));
             Write(" enum ");
             Write(desc.EscapedName);
 
@@ -94,10 +255,21 @@ namespace ClangSharp.CSharp
             WriteBlockStart();
         }
 
-        public void EndEnum() => WriteBlockEnd();
+        public void EndEnum(in EnumDesc desc) => WriteBlockEnd();
 
         public void BeginField(in FieldDesc desc)
         {
+            if (_config.GenerateDocIncludes && !string.IsNullOrWhiteSpace(desc.ParentName))
+            {
+                WriteIndented("/// <include file='");
+                Write(desc.ParentName);
+                Write(".xml' path='doc/member[@name=\"");
+                Write(desc.ParentName);
+                Write('.');
+                Write(desc.EscapedName);
+                WriteLine("\"]/*' />");
+            }
+
             if (desc.Offset is not null)
             {
                 WriteIndentedLine($"[FieldOffset({desc.Offset})]");
@@ -108,10 +280,14 @@ namespace ClangSharp.CSharp
                 AddNativeTypeNameAttribute(desc.NativeTypeName);
             }
 
-            if (desc.Location is {} location)
+            if (desc.Location is { } location)
+            {
                 WriteSourceLocation(location, false);
+            }
 
-            WriteIndented(desc.AccessSpecifier.AsString());
+            desc.WriteCustomAttrs?.Invoke(desc.CustomAttrGeneratorData);
+
+            WriteIndented(GetAccessSpecifierString(desc.AccessSpecifier, isNested: true));
             Write(' ');
 
             if (desc.NeedsNewKeyword)
@@ -147,9 +323,9 @@ namespace ClangSharp.CSharp
             Write(escapedName);
         }
 
-        public void EndField(bool isBodyless = true)
+        public void EndField(in FieldDesc desc)
         {
-            if (isBodyless)
+            if (!desc.HasBody)
             {
                 WriteSemicolon();
                 WriteNewline();
@@ -157,9 +333,29 @@ namespace ClangSharp.CSharp
             }
         }
 
-        public void BeginFunctionOrDelegate<TCustomAttrGeneratorData>(in FunctionOrDelegateDesc<TCustomAttrGeneratorData> desc, ref bool isMethodClassUnsafe)
+        public void BeginFunctionOrDelegate(in FunctionOrDelegateDesc desc, ref bool isMethodClassUnsafe)
         {
-            desc.WriteCustomAttrs(desc.CustomAttrGeneratorData);
+            if (_config.GenerateDocIncludes && !string.IsNullOrEmpty(desc.ParentName))
+            {
+                if (desc.IsInherited)
+                {
+                    WriteIndented("/// <inheritdoc cref=\"");
+                    Write(desc.ParentName);
+                    Write('.');
+                    Write(desc.EscapedName);
+                    WriteLine("\" />");
+                }
+                else
+                {
+                    WriteIndented("/// <include file='");
+                    Write(desc.ParentName);
+                    Write(".xml' path='doc/member[@name=\"");
+                    Write(desc.ParentName);
+                    Write('.');
+                    Write(desc.EscapedName);
+                    WriteLine("\"]/*' />");
+                }
+            }
 
             if (desc.IsVirtual)
             {
@@ -177,7 +373,7 @@ namespace ClangSharp.CSharp
 
                 WriteLine(']');
             }
-            else if (desc.IsDllImport)
+            else if (desc.IsDllImport && !desc.IsManualImport)
             {
                 AddUsingDirective("System.Runtime.InteropServices");
 
@@ -204,15 +400,24 @@ namespace ClangSharp.CSharp
                 }
 
                 Write("ExactSpelling = true");
-                if (desc.SetLastError)
+
+                if (desc.SetLastError && !_config.GenerateSetsLastSystemErrorAttribute)
                 {
                     Write(", SetLastError = true");
                 }
+
                 WriteLine(")]");
             }
 
             if (desc.Location is {} location)
+            {
                 WriteSourceLocation(location, false);
+            }
+
+            if (desc.SetLastError && _config.GenerateSetsLastSystemErrorAttribute)
+            {
+                WriteIndentedLine("[SetsLastSystemError]");
+            }
 
             if (desc.IsAggressivelyInlined)
             {
@@ -227,12 +432,22 @@ namespace ClangSharp.CSharp
                 AddVtblIndexAttribute(vtblIndex);
             }
 
-            if (desc.NativeTypeName is not null)
+            if ((desc.NativeTypeName is not null) && !desc.IsManualImport)
             {
                 AddNativeTypeNameAttribute(desc.NativeTypeName, attributePrefix: "return: ");
             }
 
-            WriteIndented(desc.AccessSpecifier.AsString());
+            desc.WriteCustomAttrs?.Invoke(desc.CustomAttrGeneratorData);
+
+            if (_isInMarkerInterface)
+            {
+                WriteIndentation();
+            }
+            else
+            {
+                WriteIndented(GetAccessSpecifierString(desc.AccessSpecifier, isNested: false));
+                Write(' ');
+            }
 
             if (!desc.IsMemberFunction)
             {
@@ -240,26 +455,23 @@ namespace ClangSharp.CSharp
                 {
                     if (desc.IsUnsafe && !desc.IsCxxRecordCtxUnsafe)
                     {
-                        Write(" unsafe");
+                        Write("unsafe ");
                     }
-                    Write(" delegate");
+                    Write("delegate ");
                 }
-                else if (desc.IsStatic ?? (desc.IsDllImport || !desc.IsCxx))
+                else if ((desc.IsStatic ?? (desc.IsDllImport || !desc.IsCxx)) && !desc.IsManualImport)
                 {
-                    Write(" static");
+                    Write("static ");
 
                     if (desc.IsDllImport)
                     {
-                        Write(" extern");
+                        Write("extern ");
                     }
                 }
             }
 
-            Write(' ');
-
             if (!desc.IsVirtual)
             {
-                //if (NeedsNewKeyword(escapedName, functionDecl.Parameters))
                 if (desc.NeedsNewKeyword)
                 {
                     Write("new ");
@@ -267,27 +479,35 @@ namespace ClangSharp.CSharp
 
                 if (desc.IsUnsafe)
                 {
-                    //if (cxxRecordDecl is null)
                     if (!desc.IsCtxCxxRecord)
                     {
                         isMethodClassUnsafe = true;
                     }
-                    //else if (!IsUnsafe(cxxRecordDecl))
                     else if (!desc.IsCxxRecordCtxUnsafe)
                     {
                         Write("unsafe ");
                     }
                 }
             }
+
+            if (!desc.IsCxxConstructor && !desc.IsManualImport)
+            {
+                Write(desc.ReturnType);
+                Write(' ');
+            }
         }
 
         private void WriteSourceLocation(CXSourceLocation location, bool inline)
         {
             if (!_writeSourceLocation)
+            {
                 return;
+            }
 
             if (!inline)
+            {
                 WriteIndentation();
+            }
 
             Write("[SourceLocation(\"");
             location.GetFileLocation(out var file, out var line, out var column, out _);
@@ -299,44 +519,68 @@ namespace ClangSharp.CSharp
             Write(")]");
 
             if (!inline)
+            {
                 WriteNewline();
+            }
             else
+            {
                 Write(' ');
-        }
-
-        public void WriteReturnType(string typeString)
-        {
-            Write(typeString);
-            Write(' ');
-        }
-
-        public void BeginFunctionInnerPrototype(string escapedName)
-        {
-            Write(escapedName);
-            Write('(');
-        }
-
-        public void BeginParameter<TCustomAttrGeneratorData>(in ParameterDesc<TCustomAttrGeneratorData> info)
-        {
-            if (info.NativeTypeName is not null)
-            {
-                AddNativeTypeNameAttribute(info.NativeTypeName, prefix: "", postfix: " ");
             }
+        }
 
-            if (info.CppAttributes is not null)
+        public void BeginFunctionInnerPrototype(in FunctionOrDelegateDesc desc)
+        {
+            if (desc.IsManualImport)
             {
-                AddCppAttributes(info.CppAttributes, prefix: "", postfix: " ");
+                Write("delegate* unmanaged");
+
+                if (desc.CallingConvention != CallingConvention.Winapi)
+                {
+                    Write('[');
+                    Write(desc.CallingConvention);
+                    Write(']');
+                }
+
+                Write('<');
             }
+            else
+            {
+                Write(desc.EscapedName);
+                Write('(');
+            }
+        }
 
-            if (info.Location is {} location)
-                WriteSourceLocation(location, true);
+        public void BeginParameter(in ParameterDesc info)
+        {
+            if (info.IsForManualImport)
+            {
+                Write(info.Type);
+            }
+            else
+            {
+                if (info.NativeTypeName is not null)
+                {
+                    AddNativeTypeNameAttribute(info.NativeTypeName, prefix: "", postfix: " ");
+                }
 
-            _customAttrIsForParameter = true;
-            info.WriteCustomAttrs(info.CustomAttrGeneratorData);
-            _customAttrIsForParameter = false;
-            Write(info.Type);
-            Write(' ');
-            Write(info.Name);
+                if (info.CppAttributes is not null)
+                {
+                    AddCppAttributes(info.CppAttributes, prefix: "", postfix: " ");
+                }
+
+                if (info.Location is { } location)
+                {
+                    WriteSourceLocation(location, true);
+                }
+
+                _customAttrIsForParameter = true;
+                info.WriteCustomAttrs?.Invoke(info.CustomAttrGeneratorData);
+                _customAttrIsForParameter = false;
+
+                Write(info.Type);
+                Write(' ');
+                Write(info.Name);
+            }
         }
 
         public void BeginParameterDefault() => Write(" = ");
@@ -346,7 +590,7 @@ namespace ClangSharp.CSharp
             // nop, used only by XML
         }
 
-        public void EndParameter()
+        public void EndParameter(in ParameterDesc info)
         {
             // nop, used only by XML
         }
@@ -357,7 +601,18 @@ namespace ClangSharp.CSharp
             Write(' ');
         }
 
-        public void EndFunctionInnerPrototype() => Write(')');
+        public void EndFunctionInnerPrototype(in FunctionOrDelegateDesc desc)
+        {
+            if (desc.IsManualImport)
+            {
+                Write(desc.ReturnType);
+                Write('>');
+            }
+            else
+            {
+                Write(')');
+            }
+        }
 
         public void BeginConstructorInitializer(string memberRefName, string memberInitName)
         {
@@ -420,9 +675,15 @@ namespace ClangSharp.CSharp
             }
         }
 
-        public void EndFunctionOrDelegate(bool isVirtual, bool isBodyless)
+        public void EndFunctionOrDelegate(in FunctionOrDelegateDesc desc)
         {
-            if (isBodyless)
+            if (desc.IsManualImport)
+            {
+                Write(' ');
+                Write(desc.EscapedName);
+            }
+
+            if (!desc.HasBody || desc.IsVirtual)
             {
                 WriteSemicolon();
                 WriteNewline();
@@ -431,62 +692,119 @@ namespace ClangSharp.CSharp
             NeedsNewline = true;
         }
 
-        public void BeginStruct<TCustomAttrGeneratorData>(in StructDesc<TCustomAttrGeneratorData> info)
+        public void BeginStruct(in StructDesc desc)
         {
-            if (info.Layout is not null)
+            if (_config.GenerateDocIncludes)
+            {
+                WriteIndented("/// <include file='");
+                Write(desc.EscapedName);
+                Write(".xml' path='doc/member[@name=\"");
+                Write(desc.EscapedName);
+                WriteLine("\"]/*' />");
+            }
+
+            if (desc.LayoutAttribute is not null)
             {
                 AddUsingDirective("System.Runtime.InteropServices");
                 WriteIndented("[StructLayout(LayoutKind.");
-                Write(info.Layout.Value);
-                if (info.Layout.Pack != default)
+                Write(desc.LayoutAttribute.Value);
+
+                if (desc.LayoutAttribute.Pack != 0)
                 {
                     Write(", Pack = ");
-                    Write(info.Layout.Pack);
+                    Write(desc.LayoutAttribute.Pack);
                 }
 
                 WriteLine(")]");
             }
 
-            if (info.Uuid is not null)
+            if (desc.Uuid is not null)
             {
                 AddUsingDirective("System.Runtime.InteropServices");
 
                 WriteIndented("[Guid(\"");
-                Write(info.Uuid.Value.ToString("D", CultureInfo.InvariantCulture).ToUpperInvariant());
+                Write(desc.Uuid.Value.ToString("D", CultureInfo.InvariantCulture).ToUpperInvariant());
                 WriteLine("\")]");
             }
 
-            if (info.NativeType is not null)
+            if (desc.NativeType is not null)
             {
-                AddNativeTypeNameAttribute(info.NativeType);
+                AddNativeTypeNameAttribute(desc.NativeType);
             }
 
-            if (info.NativeInheritance is not null)
+            if (desc.NativeInheritance is not null)
             {
-                AddNativeInheritanceAttribute(info.NativeInheritance);
+                AddNativeInheritanceAttribute(desc.NativeInheritance);
             }
 
-            if (info.Location is {} location)
+            if (desc.Location is {} location)
+            {
                 WriteSourceLocation(location, false);
+            }
 
-            WriteIndented(info.AccessSpecifier.AsString());
+            desc.WriteCustomAttrs?.Invoke(desc.CustomAttrGeneratorData);
+
+            WriteIndented(GetAccessSpecifierString(desc.AccessSpecifier, desc.IsNested));
             Write(' ');
 
-            if (info.IsUnsafe)
+            if (desc.IsUnsafe)
             {
                 Write("unsafe ");
             }
 
             Write("partial struct ");
-            Write(info.EscapedName);
+            Write(desc.EscapedName);
+
+            if (desc.HasVtbl && _config.GenerateMarkerInterfaces)
+            {
+                Write(" : ");
+                Write(desc.EscapedName);
+                Write(".Interface");
+            }
+
             WriteNewline();
             WriteBlockStart();
         }
 
+        public void BeginMarkerInterface(string[] baseTypeNames)
+        {
+            WriteIndented("public interface Interface");
+
+            if (baseTypeNames is not null)
+            {
+                Write(" : ");
+                Write(baseTypeNames[0]);
+                Write(".Interface");
+
+                for (var i = 1; i < baseTypeNames.Length; i++)
+                {
+                    Write(", ");
+                    Write(baseTypeNames[i]);
+                    Write(".Interface");
+                }
+            }
+
+            WriteNewline();
+            WriteBlockStart();
+            _isInMarkerInterface = true;
+        }
+
         public void BeginExplicitVtbl()
         {
-            NeedsNewline = true;
-            WriteIndentedLine("public partial struct Vtbl");
+            WriteIndented("public partial struct Vtbl");
+
+            if (_config.GenerateMarkerInterfaces && !_config.ExcludeFnptrCodegen)
+            {
+                WriteLine("<TSelf>");
+                IncreaseIndentation();
+                WriteIndentedLine("where TSelf : unmanaged, Interface");
+                DecreaseIndentation();
+            }
+            else
+            {
+                WriteNewline();
+            }
+
             WriteBlockStart();
         }
 
@@ -500,7 +818,13 @@ namespace ClangSharp.CSharp
 
         public void EmitSystemSupport() => AddUsingDirective("System");
 
-        public void EndStruct() => WriteBlockEnd();
+        public void EndStruct(in StructDesc desc) => WriteBlockEnd();
+
+        public void EndMarkerInterface()
+        {
+            _isInMarkerInterface = false;
+            WriteBlockEnd();
+        }
 
         public void EndExplicitVtbl() => WriteBlockEnd();
 
@@ -549,7 +873,7 @@ namespace ClangSharp.CSharp
         public void BeginIndexer(AccessSpecifier accessSpecifier, bool isUnsafe)
         {
             NeedsNewline = true;
-            WriteIndented(accessSpecifier.AsString());
+            WriteIndented(GetAccessSpecifierString(accessSpecifier, isNested: true));
             Write(' ');
             if (isUnsafe)
             {
@@ -574,6 +898,45 @@ namespace ClangSharp.CSharp
         public void EndDereference()
         {
             // nop, used only by XML
+        }
+
+        private string GetAccessSpecifierString(AccessSpecifier accessSpecifier, bool isNested)
+        {
+            switch (accessSpecifier)
+            {
+                case AccessSpecifier.Private:
+                {
+                    // Non-nested members can only be public or internal
+                    // and C# defaults to internal when no specifier is given
+
+                    if (!isNested)
+                    {
+                        accessSpecifier = AccessSpecifier.Internal;
+                    }
+                    break;
+                }
+
+                case AccessSpecifier.PrivateProtected:
+                {
+                    // We only generate structs, enums, or static members so protected is invalid
+                    // fallback to internal to match the non-external visibility of private protected
+
+                    accessSpecifier = AccessSpecifier.Internal;
+                    break;
+                }
+
+                case AccessSpecifier.Protected:
+                case AccessSpecifier.ProtectedInternal:
+                {
+                    // We only generate structs, enums, or static members so protected is invalid
+                    // fallback to internal to match the external visibility of protected and protected internal
+
+                    accessSpecifier = AccessSpecifier.Public;
+                    break;
+                }
+            }
+
+            return accessSpecifier.AsString();
         }
     }
 }

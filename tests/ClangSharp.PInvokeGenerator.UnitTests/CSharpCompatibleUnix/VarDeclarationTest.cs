@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -7,7 +7,7 @@ namespace ClangSharp.UnitTests
 {
     public sealed class CSharpCompatibleUnix_VarDeclarationTest : VarDeclarationTest
     {
-        public override Task BasicTest(string nativeType, string expectedManagedType)
+        protected override Task BasicTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"{nativeType} MyVariable = 0;";
 
@@ -23,7 +23,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedCSharpCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task BasicWithNativeTypeNameTest(string nativeType, string expectedManagedType)
+        protected override Task BasicWithNativeTypeNameTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"{nativeType} MyVariable = 0;";
 
@@ -40,7 +40,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedCSharpCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task GuidMacroTest()
+        protected override Task GuidMacroTestImpl()
         {
             var inputContents = $@"struct GUID {{
     unsigned long  Data1;
@@ -69,7 +69,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleUnixBindingsAsync(inputContents, expectedOutputContents, excludedNames: excludedNames, remappedNames: remappedNames);
         }
 
-        public override Task MacroTest(string nativeValue, string expectedManagedType, string expectedManagedValue)
+        protected override Task MacroTestImpl(string nativeValue, string expectedManagedType, string expectedManagedValue)
         {
             var inputContents = $@"#define MyMacro1 {nativeValue}
 #define MyMacro2 MyMacro1";
@@ -90,7 +90,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task MultilineMacroTest()
+        protected override Task MultilineMacroTestImpl()
         {
             var inputContents = $@"#define MyMacro1 0 + \
 1";
@@ -108,14 +108,14 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task NoInitializerTest(string nativeType)
+        protected override Task NoInitializerTestImpl(string nativeType)
         {
             var inputContents = $@"{nativeType} MyVariable;";
             var expectedOutputContents = "";
             return ValidateGeneratedCSharpCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task Utf8StringLiteralMacroTest()
+        protected override Task Utf8StringLiteralMacroTestImpl()
         {
             var inputContents = $@"#define MyMacro1 ""Test""";
 
@@ -134,7 +134,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task Utf16StringLiteralMacroTest()
+        protected override Task Utf16StringLiteralMacroTestImpl()
         {
             var inputContents = $@"#define MyMacro1 u""Test""";
 
@@ -151,11 +151,11 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task WideStringLiteralConstTest() =>
+        protected override Task WideStringLiteralConstTestImpl() =>
             // Unsupported string literal kind: 'CX_CLK_Wide'
             Task.CompletedTask;
 
-        public override Task StringLiteralConstTest()
+        protected override Task StringLiteralConstTestImpl()
         {
             var inputContents = $@"const char MyConst1[] = ""Test"";";
 
@@ -174,7 +174,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UncheckedConversionMacroTest()
+        protected override Task UncheckedConversionMacroTestImpl()
         {
             var inputContents = $@"#define MyMacro1 (long)0x80000000L
 #define MyMacro2 (int)0x80000000";
@@ -186,7 +186,7 @@ namespace ClangSharp.Test
     public static partial class Methods
     {{
         [NativeTypeName(""#define MyMacro1 (long)0x80000000L"")]
-        public const IntPtr MyMacro1 = (IntPtr)(0x80000000);
+        public const IntPtr MyMacro1 = unchecked((nint)(0x80000000));
 
         [NativeTypeName(""#define MyMacro2 (int)0x80000000"")]
         public const int MyMacro2 = unchecked((int)(0x80000000));
@@ -197,7 +197,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UncheckedFunctionLikeCastMacroTest()
+        protected override Task UncheckedFunctionLikeCastMacroTestImpl()
         {
             var inputContents = $@"#define MyMacro1 unsigned(-1)";
 
@@ -214,7 +214,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UncheckedConversionMacroTest2()
+        protected override Task UncheckedConversionMacroTest2Impl()
         {
             var inputContents = $@"#define MyMacro1(x, y, z) ((int)(((unsigned long)(x)<<31) | ((unsigned long)(y)<<16) | ((unsigned long)(z))))
 #define MyMacro2(n) MyMacro1(1, 2, n)
@@ -227,7 +227,7 @@ namespace ClangSharp.Test
     public static partial class Methods
     {{
         [NativeTypeName(""#define MyMacro3 MyMacro2(3)"")]
-        public const int MyMacro3 = unchecked((int)(((UIntPtr)(1) << 31) | ((UIntPtr)(2) << 16) | ((UIntPtr)(3))));
+        public const int MyMacro3 = unchecked((int)(((nuint)(1) << 31) | ((nuint)(2) << 16) | ((nuint)(3))));
     }}
 }}
 ";
@@ -236,7 +236,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleUnixBindingsAsync(inputContents, expectedOutputContents, excludedNames: excludedNames);
         }
 
-        public override Task UncheckedPointerMacroTest()
+        protected override Task UncheckedPointerMacroTestImpl()
         {
             var inputContents = $@"#define Macro1 ((int*) -1)";
 
@@ -253,7 +253,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UncheckedReinterpretCastMacroTest()
+        protected override Task UncheckedReinterpretCastMacroTestImpl()
         {
             var inputContents = $@"#define Macro1 reinterpret_cast<int*>(-1)";
 
@@ -270,7 +270,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task MultidimensionlArrayTest()
+        protected override Task MultidimensionlArrayTestImpl()
         {
             var inputContents = $@"const int MyArray[2][2] = {{ {{ 0, 1 }}, {{ 2, 3 }} }};";
 
@@ -279,7 +279,7 @@ namespace ClangSharp.Test
     public static partial class Methods
     {{
         [NativeTypeName(""const int [2][2]"")]
-        public static int[][] MyArray = new int[2][]
+        public static readonly int[][] MyArray = new int[2][]
         {{
             new int[2]
             {{
@@ -299,7 +299,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ConditionalDefineConstTest()
+        protected override Task ConditionalDefineConstTestImpl()
         {
             var inputContents = @"typedef int TESTRESULT;
 #define TESTRESULT_FROM_WIN32(x) ((TESTRESULT)(x) <= 0 ? ((TESTRESULT)(x)) : ((TESTRESULT) (((x) & 0x0000FFFF) | (7 << 16) | 0x80000000)))

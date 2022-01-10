@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.Collections.Generic;
@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using ClangSharp.Abstractions;
 using ClangSharp.CSharp;
 using ClangSharp.Interop;
@@ -20,6 +21,10 @@ namespace ClangSharp
     {
         private const int DefaultStreamWriterBufferSize = 1024;
         private static readonly Encoding s_defaultStreamWriterEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+        private static readonly Regex s_needsSystemSupportRegex = new Regex(@"\b(?:Guid|IntPtr|UIntPtr)\b", RegexOptions.Compiled);
+
+        private const string ExpectedClangVersion = "13.0.0";
+        private const string ExpectedClangSharpVersion = "13.0.0";
 
         private readonly CXIndex _index;
         private readonly OutputBuilderFactory _outputBuilderFactory;
@@ -27,28 +32,58 @@ namespace ClangSharp
         private readonly StringBuilder _fileContentsBuilder;
         private readonly HashSet<string> _visitedFiles;
         private readonly List<Diagnostic> _diagnostics;
-        private readonly LinkedList<Cursor> _context;
+        private readonly LinkedList<(Cursor Cursor, object UserData)> _context;
         private readonly Dictionary<string, Guid> _uuidsToGenerate;
         private readonly HashSet<string> _generatedUuids;
         private readonly PInvokeGeneratorConfiguration _config;
+        private readonly Dictionary<NamedDecl, string> _cursorNames;
+        private readonly Dictionary<(NamedDecl namedDecl, bool truncateForFunctionParameters), string> _cursorQualifiedNames;
+        private readonly Dictionary<(Cursor cursor, Cursor context, Type type), (string typeName, string nativeTypeName)> _typeNames;
+        private readonly Dictionary<string, HashSet<string>> _allValidNameRemappings;
+        private readonly Dictionary<string, HashSet<string>> _traversedValidNameRemappings;
+        private readonly Dictionary<CXXMethodDecl, uint> _overloadIndices;
+        private readonly Dictionary<Cursor, uint> _isExcluded;
+        private readonly Dictionary<string, bool> _isTopLevelClassUnsafe;
+        private readonly Dictionary<string, HashSet<string>> _topLevelClassUsings;
+        private readonly Dictionary<string, List<string>> _topLevelClassAttributes;
+        private readonly HashSet<string> _topLevelClassNames;
+        private readonly HashSet<string> _usedRemappings;
 
         private string _filePath;
         private string[] _clangCommandLineArgs;
         private CXTranslationUnit_Flags _translationFlags;
+        private string _currentClass;
+        private string _currentNamespace;
 
         private IOutputBuilder _outputBuilder;
         private CSharpOutputBuilder _testOutputBuilder;
         private CSharpOutputBuilder _stmtOutputBuilder;
+        private CSharpOutputBuilder _testStmtOutputBuilder;
         private int _stmtOutputBuilderUsers;
+        private int _testStmtOutputBuilderUsers;
         private int _outputBuilderUsers;
+        private CXXRecordDecl _cxxRecordDeclContext;
         private bool _disposed;
-        private bool _isMethodClassUnsafe;
 
         public PInvokeGenerator(PInvokeGeneratorConfiguration config, Func<string, Stream> outputStreamFactory = null)
         {
             if (config is null)
             {
                 throw new ArgumentNullException(nameof(config));
+            }
+
+            var clangVersion = clang.getClangVersion().ToString();
+
+            if (!clangVersion.Contains("13.0.0"))
+            {
+                throw new InvalidOperationException($"Invalid libClang version. Returned string '{clangVersion}' does not contain '{ExpectedClangVersion}'");
+            }
+
+            var clangSharpVersion = clangsharp.getVersion().ToString();
+
+            if (!clangSharpVersion.Contains("13.0.0"))
+            {
+                throw new InvalidOperationException($"Invalid libClang version. Returned string '{clangSharpVersion}' does not contain '{ExpectedClangSharpVersion}'");
             }
 
             _index = CXIndex.Create();
@@ -61,10 +96,28 @@ namespace ClangSharp
             _fileContentsBuilder = new StringBuilder();
             _visitedFiles = new HashSet<string>();
             _diagnostics = new List<Diagnostic>();
-            _context = new LinkedList<Cursor>();
+            _context = new LinkedList<(Cursor, object)>();
             _config = config;
             _uuidsToGenerate = new Dictionary<string, Guid>();
             _generatedUuids = new HashSet<string>();
+            _cursorNames = new Dictionary<NamedDecl, string>();
+            _cursorQualifiedNames = new Dictionary<(NamedDecl, bool), string>();
+            _typeNames = new Dictionary<(Cursor, Cursor, Type), (string, string)>();
+            _allValidNameRemappings = new Dictionary<string, HashSet<string>>() {
+                ["intptr_t"] = new HashSet<string>() { "IntPtr", "nint" },
+                ["ptrdiff_t"] = new HashSet<string>() { "IntPtr", "nint" },
+                ["size_t"] = new HashSet<string>() { "UIntPtr", "nuint" },
+                ["uintptr_t"] = new HashSet<string>() { "UIntPtr", "nuint" },
+                ["_GUID"] = new HashSet<string>() { "Guid" },
+            };
+            _traversedValidNameRemappings = new Dictionary<string, HashSet<string>>();
+            _overloadIndices = new Dictionary<CXXMethodDecl, uint>();
+            _isExcluded = new Dictionary<Cursor, uint>();
+            _isTopLevelClassUnsafe = new Dictionary<string, bool>();
+            _topLevelClassNames = new HashSet<string>();
+            _topLevelClassAttributes = new Dictionary<string, List<string>>();
+            _topLevelClassUsings = new Dictionary<string, HashSet<string>>();
+            _usedRemappings = new HashSet<string>();
         }
 
         ~PInvokeGenerator()
@@ -74,18 +127,21 @@ namespace ClangSharp
 
         public PInvokeGeneratorConfiguration Config => _config;
 
-        public Cursor CurrentContext => _context.Last.Value;
+        public (Cursor Cursor, object UserData) CurrentContext => _context.Last.Value;
 
         public IReadOnlyList<Diagnostic> Diagnostics => _diagnostics;
 
+        public string FilePath => _filePath;
+
         public CXIndex IndexHandle => _index;
 
-        public Cursor PreviousContext => _context.Last.Previous.Value;
+        public (Cursor Cursor, object UserData) PreviousContext => _context.Last.Previous.Value;
 
         public void Close()
         {
             Stream stream = null;
-            IOutputBuilder methodClassOutputBuilder = null;
+            var methodClassOutputBuilders = new Dictionary<string, IOutputBuilder>();
+            var methodClassTestOutputBuilders = new Dictionary<string, IOutputBuilder>();
             var emitNamespaceDeclaration = true;
             var leaveStreamOpen = false;
 
@@ -93,17 +149,13 @@ namespace ClangSharp
             {
                 var iidName = foundUuid.Key;
 
-                if (_generatedUuids.Contains(iidName))
+                if (_generatedUuids.Contains(iidName) || _config.ExcludedNames.Contains(iidName))
                 {
                     continue;
                 }
 
-                var iidValue = foundUuid.Value.ToString("X").ToUpperInvariant().Replace("{", "").Replace("}", "").Replace('X', 'x').Replace(",", ", ");
-
-                StartUsingOutputBuilder(_config.MethodClassName);
-
-                _outputBuilder.WriteIid(iidName, iidValue);
-
+                StartUsingOutputBuilder(GetClass(iidName));
+                _outputBuilder.WriteIid(iidName, foundUuid.Value);
                 StopUsingOutputBuilder();
             }
 
@@ -225,8 +277,7 @@ namespace ClangSharp
             foreach (var outputBuilder in _outputBuilderFactory.OutputBuilders)
             {
                 var outputPath = outputBuilder.IsTestOutput ? _config.TestOutputLocation : _config.OutputLocation;
-
-                var isMethodClass = _config.MethodClassName.Equals(outputBuilder.Name);
+                var isMethodClass = _topLevelClassNames.Contains(outputBuilder.Name);
 
                 if (_config.GenerateMultipleFiles)
                 {
@@ -236,7 +287,14 @@ namespace ClangSharp
                 }
                 else if (isMethodClass)
                 {
-                    methodClassOutputBuilder = outputBuilder;
+                    if (outputBuilder.IsTestOutput)
+                    {
+                        methodClassTestOutputBuilders.Add(outputBuilder.Name, outputBuilder);
+                    }
+                    else
+                    {
+                        methodClassOutputBuilders.Add(outputBuilder.Name, outputBuilder);
+                    }
                     continue;
                 }
 
@@ -244,11 +302,27 @@ namespace ClangSharp
                 emitNamespaceDeclaration = false;
             }
 
+            if (_config.GenerateHelperTypes && (_config.OutputMode == PInvokeGeneratorOutputMode.CSharp))
+            {
+                _ = Directory.CreateDirectory(_config.OutputLocation);
+
+                GenerateNativeInheritanceAttribute(this);
+                GenerateNativeTypeNameAttribute(this);
+                GenerateSetsLastSystemErrorAttribute(this);
+                GenerateVtblIndexAttribute(this);
+                GenerateTransparentStructs(this);
+            }
+
             if (leaveStreamOpen && _outputBuilderFactory.OutputBuilders.Any())
             {
-                if (methodClassOutputBuilder != null)
+                foreach (var entry in methodClassOutputBuilders)
                 {
-                    CloseOutputBuilder(stream, methodClassOutputBuilder, isMethodClass: true, leaveStreamOpen, emitNamespaceDeclaration);
+                    CloseOutputBuilder(stream, entry.Value, isMethodClass: true, leaveStreamOpen, emitNamespaceDeclaration);
+                }
+
+                foreach (var entry in methodClassTestOutputBuilders)
+                {
+                    CloseOutputBuilder(stream, entry.Value, isMethodClass: true, leaveStreamOpen, emitNamespaceDeclaration);
                 }
 
                 using var sw = new StreamWriter(stream, s_defaultStreamWriterEncoding, DefaultStreamWriterBufferSize, leaveStreamOpen);
@@ -282,6 +356,856 @@ namespace ClangSharp
             _outputBuilderFactory.Clear();
             _uuidsToGenerate.Clear();
             _visitedFiles.Clear();
+
+            static void GenerateNativeInheritanceAttribute(PInvokeGenerator generator)
+            {
+                var config = generator.Config;
+                var outputPath = Path.Combine(config.OutputLocation, "NativeInheritanceAttribute.cs");
+
+                using var sw = new StreamWriter(outputPath);
+                sw.NewLine = "\n";
+
+                if (config.HeaderText != string.Empty)
+                {
+                    sw.WriteLine(config.HeaderText);
+                }
+
+                var indentString = "    ";
+
+                sw.WriteLine("using System;");
+                sw.WriteLine("using System.Diagnostics;");
+                sw.WriteLine();
+
+                sw.Write("namespace ");
+                sw.Write(generator.GetNamespace("NativeInheritanceAttribute"));
+
+                if (generator.Config.GenerateFileScopedNamespaces)
+                {
+                    sw.WriteLine(';');
+                    sw.WriteLine();
+                    indentString = "";
+                }
+                else
+                {
+                    sw.WriteLine();
+                    sw.WriteLine('{');
+                }
+
+                sw.Write(indentString);
+                sw.WriteLine("/// <summary>Defines the base type of a struct as it was in the native signature.</summary>");
+                sw.Write(indentString);
+                sw.WriteLine("[AttributeUsage(AttributeTargets.Struct, AllowMultiple = false, Inherited = true)]");
+                sw.Write(indentString);
+                sw.WriteLine("[Conditional(\"DEBUG\")]");
+                sw.Write(indentString);
+                sw.WriteLine("internal sealed partial class NativeInheritanceAttribute : Attribute");
+                sw.Write(indentString);
+                sw.WriteLine('{');
+                sw.Write(indentString);
+                sw.WriteLine("    private readonly string _name;");
+                sw.WriteLine();
+                sw.Write(indentString);
+                sw.WriteLine("    /// <summary>Initializes a new instance of the <see cref=\"NativeInheritanceAttribute\" /> class.</summary>");
+                sw.Write(indentString);
+                sw.WriteLine("    /// <param name=\"name\">The name of the base type that was inherited from in the native signature.</param>");
+                sw.Write(indentString);
+                sw.WriteLine("    public NativeInheritanceAttribute(string name)");
+                sw.Write(indentString);
+                sw.WriteLine("    {");
+                sw.Write(indentString);
+                sw.WriteLine("        _name = name;");
+                sw.Write(indentString);
+                sw.WriteLine("    }");
+                sw.WriteLine();
+                sw.Write(indentString);
+                sw.WriteLine("    /// <summary>Gets the name of the base type that was inherited from in the native signature.</summary>");
+                sw.Write(indentString);
+                sw.WriteLine("    public string Name => _name;");
+                sw.Write(indentString);
+                sw.WriteLine('}');
+
+                if (!generator.Config.GenerateFileScopedNamespaces)
+                {
+                    sw.WriteLine('}');
+                }
+            }
+
+            static void GenerateNativeTypeNameAttribute(PInvokeGenerator generator)
+            {
+                var config = generator.Config;
+                var outputPath = Path.Combine(config.OutputLocation, "NativeTypeNameAttribute.cs");
+
+                using var sw = new StreamWriter(outputPath);
+                sw.NewLine = "\n";
+
+                if (config.HeaderText != string.Empty)
+                {
+                    sw.WriteLine(config.HeaderText);
+                }
+
+                var indentString = "    ";
+
+                sw.WriteLine("using System;");
+                sw.WriteLine("using System.Diagnostics;");
+                sw.WriteLine();
+
+                sw.Write("namespace ");
+                sw.Write(generator.GetNamespace("NativeTypeNameAttribute"));
+
+                if (generator.Config.GenerateFileScopedNamespaces)
+                {
+                    sw.WriteLine(';');
+                    sw.WriteLine();
+                    indentString = "";
+                }
+                else
+                {
+                    sw.WriteLine();
+                    sw.WriteLine('{');
+                }
+
+                sw.Write(indentString);
+                sw.WriteLine("/// <summary>Defines the type of a member as it was used in the native signature.</summary>");
+                sw.Write(indentString);
+                sw.WriteLine("[AttributeUsage(AttributeTargets.Struct | AttributeTargets.Enum | AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Parameter | AttributeTargets.ReturnValue, AllowMultiple = false, Inherited = true)]");
+                sw.Write(indentString);
+                sw.WriteLine("[Conditional(\"DEBUG\")]");
+                sw.Write(indentString);
+                sw.WriteLine("internal sealed partial class NativeTypeNameAttribute : Attribute");
+                sw.Write(indentString);
+                sw.WriteLine('{');
+                sw.Write(indentString);
+                sw.WriteLine("    private readonly string _name;");
+                sw.WriteLine();
+                sw.Write(indentString);
+                sw.WriteLine("    /// <summary>Initializes a new instance of the <see cref=\"NativeTypeNameAttribute\" /> class.</summary>");
+                sw.Write(indentString);
+                sw.WriteLine("    /// <param name=\"name\">The name of the type that was used in the native signature.</param>");
+                sw.Write(indentString);
+                sw.WriteLine("    public NativeTypeNameAttribute(string name)");
+                sw.Write(indentString);
+                sw.WriteLine("    {");
+                sw.Write(indentString);
+                sw.WriteLine("        _name = name;");
+                sw.Write(indentString);
+                sw.WriteLine("    }");
+                sw.WriteLine();
+                sw.Write(indentString);
+                sw.WriteLine("    /// <summary>Gets the name of the type that was used in the native signature.</summary>");
+                sw.Write(indentString);
+                sw.WriteLine("    public string Name => _name;");
+                sw.Write(indentString);
+                sw.WriteLine('}');
+
+                if (!generator.Config.GenerateFileScopedNamespaces)
+                {
+                    sw.WriteLine('}');
+                }
+            }
+
+            static void GenerateSetsLastSystemErrorAttribute(PInvokeGenerator generator)
+            {
+                var config = generator.Config;
+                var outputPath = Path.Combine(config.OutputLocation, "SetsLastSystemErrorAttribute.cs");
+
+                using var sw = new StreamWriter(outputPath);
+                sw.NewLine = "\n";
+
+                if (config.HeaderText != string.Empty)
+                {
+                    sw.WriteLine(config.HeaderText);
+                }
+
+                var indentString = "    ";
+
+                sw.WriteLine("using System;");
+                sw.WriteLine("using System.Diagnostics;");
+                sw.WriteLine("using System.Runtime.InteropServices;");
+                sw.WriteLine();
+
+                sw.Write("namespace ");
+                sw.Write(generator.GetNamespace("SetsLastSystemErrorAttribute"));
+
+                if (generator.Config.GenerateFileScopedNamespaces)
+                {
+                    sw.WriteLine(';');
+                    sw.WriteLine();
+                    indentString = "";
+                }
+                else
+                {
+                    sw.WriteLine();
+                    sw.WriteLine('{');
+                }
+
+                sw.Write(indentString);
+                sw.WriteLine("/// <summary>Specifies that the given method sets the last system error and it can be retrieved via <see cref=\"Marshal.GetLastSystemError\" />.</summary>");
+                sw.Write(indentString);
+                sw.WriteLine("[AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = true)]");
+                sw.Write(indentString);
+                sw.WriteLine("[Conditional(\"DEBUG\")]");
+                sw.Write(indentString);
+                sw.WriteLine("internal sealed partial class SetsLastSystemErrorAttribute : Attribute");
+                sw.Write(indentString);
+                sw.WriteLine('{');
+                sw.Write(indentString);
+                sw.WriteLine("    /// <summary>Initializes a new instance of the <see cref=\"SetsLastSystemErrorAttribute\" /> class.</summary>");
+                sw.Write(indentString);
+                sw.WriteLine("    public SetsLastSystemErrorAttribute()");
+                sw.Write(indentString);
+                sw.WriteLine("    {");
+                sw.Write(indentString);
+                sw.WriteLine("    }");
+                sw.Write(indentString);
+                sw.WriteLine('}');
+
+                if (!generator.Config.GenerateFileScopedNamespaces)
+                {
+                    sw.WriteLine('}');
+                }
+            }
+
+            static void GenerateVtblIndexAttribute(PInvokeGenerator generator)
+            {
+                var config = generator.Config;
+                var outputPath = Path.Combine(config.OutputLocation, "VtblIndexAttribute.cs");
+
+                using var sw = new StreamWriter(outputPath);
+                sw.NewLine = "\n";
+
+                if (config.HeaderText != string.Empty)
+                {
+                    sw.WriteLine(config.HeaderText);
+                }
+
+                var indentString = "    ";
+
+                sw.WriteLine("using System;");
+                sw.WriteLine("using System.Diagnostics;");
+                sw.WriteLine();
+
+                sw.Write("namespace ");
+                sw.Write(generator.GetNamespace("VtblIndexAttribute"));
+
+                if (generator.Config.GenerateFileScopedNamespaces)
+                {
+                    sw.WriteLine(';');
+                    sw.WriteLine();
+                    indentString = "";
+                }
+                else
+                {
+                    sw.WriteLine();
+                    sw.WriteLine('{');
+                }
+
+                sw.Write(indentString);
+                sw.WriteLine("/// <summary>Defines the vtbl index of a method as it was in the native signature.</summary>");
+                sw.Write(indentString);
+                sw.WriteLine("[AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = true)]");
+                sw.Write(indentString);
+                sw.WriteLine("[Conditional(\"DEBUG\")]");
+                sw.Write(indentString);
+                sw.WriteLine("internal sealed partial class VtblIndexAttribute : Attribute");
+                sw.Write(indentString);
+                sw.WriteLine('{');
+                sw.Write(indentString);
+                sw.WriteLine("    private readonly uint _index;");
+                sw.WriteLine();
+                sw.Write(indentString);
+                sw.WriteLine("    /// <summary>Initializes a new instance of the <see cref=\"VtblIndexAttribute\" /> class.</summary>");
+                sw.Write(indentString);
+                sw.WriteLine("    /// <param name=\"index\">The vtbl index of a method as it was in the native signature.</param>");
+                sw.Write(indentString);
+                sw.WriteLine("    public VtblIndexAttribute(uint index)");
+                sw.Write(indentString);
+                sw.WriteLine("    {");
+                sw.Write(indentString);
+                sw.WriteLine("        _index = index;");
+                sw.Write(indentString);
+                sw.WriteLine("    }");
+                sw.WriteLine();
+                sw.Write(indentString);
+                sw.WriteLine("    /// <summary>Gets the vtbl index of a method as it was in the native signature.</summary>");
+                sw.Write(indentString);
+                sw.WriteLine("    public uint Index => _index;");
+                sw.Write(indentString);
+                sw.WriteLine('}');
+
+                if (!generator.Config.GenerateFileScopedNamespaces)
+                {
+                    sw.WriteLine('}');
+                }
+            }
+
+            static void GenerateTransparentStructs(PInvokeGenerator generator)
+            {
+                var config = generator.Config;
+
+                foreach (var transparentStruct in config.WithTransparentStructs)
+                {
+                    var name = transparentStruct.Key;
+                    var type = transparentStruct.Value.Name;
+                    var kind = transparentStruct.Value.Kind;
+
+                    var isTypePointer = type.Contains('*');
+                    var outputPath = Path.Combine(config.OutputLocation, $"{name}.cs");
+
+                    using var sw = new StreamWriter(outputPath);
+                    sw.NewLine = "\n";
+
+                    if (config.HeaderText != string.Empty)
+                    {
+                        sw.WriteLine(config.HeaderText);
+                    }
+
+                    var indentString = "    ";
+                    var targetNamespace = generator.GetNamespace(name);
+
+                    sw.WriteLine("using System;");
+
+                    if (kind == PInvokeGeneratorTransparentStructKind.HandleWin32)
+                    {
+                        var handleNamespace = generator.GetNamespace("HANDLE");
+
+                        if (targetNamespace != handleNamespace)
+                        {
+                            sw.Write("using ");
+                            sw.Write(handleNamespace);
+                            sw.WriteLine(';');
+                        }
+                    }
+
+                    sw.WriteLine();
+
+                    sw.Write("namespace ");sw.WriteLine();
+                    sw.Write(targetNamespace);
+
+                    if (generator.Config.GenerateFileScopedNamespaces)
+                    {
+                        sw.WriteLine(';');
+                        sw.WriteLine();
+                        indentString = "";
+                    }
+                    else
+                    {
+                        sw.WriteLine();
+                        sw.WriteLine('{');
+                    }
+
+                    sw.Write(indentString);
+                    sw.Write("public ");
+
+                    if (isTypePointer || IsTransparentStructHexBased(kind))
+                    {
+                        sw.Write("unsafe ");
+                    }
+
+                    sw.Write("partial struct ");
+                    sw.Write(name);
+                    sw.Write(" : IComparable, IComparable<");
+                    sw.Write(name);
+                    sw.Write(">, IEquatable<");
+                    sw.Write(name);
+                    sw.WriteLine(">, IFormattable");
+
+                    sw.Write(indentString);
+                    sw.WriteLine('{');
+
+                    sw.Write(indentString);
+                    sw.Write("    public readonly ");
+                    sw.Write(type);
+                    sw.WriteLine(" Value;");
+                    sw.WriteLine();
+
+                    // All transparent structs be created directly from the underlying type
+
+                    sw.Write(indentString);
+                    sw.Write("    public ");
+                    sw.Write(name);
+                    sw.Write('(');
+                    sw.Write(type);
+                    sw.WriteLine(" value)");
+                    sw.Write(indentString);
+                    sw.WriteLine("    {");
+                    sw.Write(indentString);
+                    sw.WriteLine("        Value = value;");
+                    sw.Write(indentString);
+                    sw.WriteLine("    }");
+                    sw.WriteLine();
+
+                    if (IsTransparentStructHandle(kind) || (kind == PInvokeGeneratorTransparentStructKind.HandleVulkan))
+                    {
+                        // Handle like transparent structs define a NULL member
+
+                        if (kind == PInvokeGeneratorTransparentStructKind.HandleWin32)
+                        {
+                            sw.Write(indentString);
+                            sw.Write("    public static ");
+                            sw.Write(name);
+                            sw.Write(" INVALID_VALUE => new ");
+                            sw.Write(name);
+
+                            if (isTypePointer)
+                            {
+                                sw.Write("((");
+                                sw.Write(type);
+                                sw.WriteLine(")(-1));");
+                            }
+                            else
+                            {
+                                sw.WriteLine("(-1);");
+                            }
+
+                            sw.WriteLine();
+                        }
+
+                        sw.Write(indentString);
+                        sw.Write("    public static ");
+                        sw.Write(name);
+                        sw.Write(" NULL => new ");
+                        sw.Write(name);
+
+                        if (isTypePointer)
+                        {
+                            sw.WriteLine("(null);");
+                        }
+                        else
+                        {
+                            sw.WriteLine("(0);");
+                        }
+
+                        sw.WriteLine();
+                    }
+                    else if (IsTransparentStructBoolean(kind))
+                    {
+                        // Boolean like transparent structs define FALSE and TRUE members
+
+                        sw.Write(indentString);
+                        sw.Write("    public static ");
+                        sw.Write(name);
+                        sw.Write(" FALSE => new ");
+                        sw.Write(name);
+                        sw.WriteLine("(0);");
+                        sw.WriteLine();
+
+                        sw.Write(indentString);
+                        sw.Write("    public static ");
+                        sw.Write(name);
+                        sw.Write(" TRUE => new ");
+                        sw.Write(name);
+                        sw.WriteLine("(1);");
+                        sw.WriteLine();
+                    }
+
+                    // All transparent structs support equality and relational comparisons with themselves
+
+                    sw.Write(indentString);
+                    sw.Write("    public static bool operator ==(");
+                    sw.Write(name);
+                    sw.Write(" left, ");
+                    sw.Write(name);
+                    sw.WriteLine(" right) => left.Value == right.Value;");
+                    sw.WriteLine();
+
+                    sw.Write(indentString);
+                    sw.Write("    public static bool operator !=(");
+                    sw.Write(name);
+                    sw.Write(" left, ");
+                    sw.Write(name);
+                    sw.WriteLine(" right) => left.Value != right.Value;");
+                    sw.WriteLine();
+
+                    sw.Write(indentString);
+                    sw.Write("    public static bool operator <(");
+                    sw.Write(name);
+                    sw.Write(" left, ");
+                    sw.Write(name);
+                    sw.WriteLine(" right) => left.Value < right.Value;");
+                    sw.WriteLine();
+
+                    sw.Write(indentString);
+                    sw.Write("    public static bool operator <=(");
+                    sw.Write(name);
+                    sw.Write(" left, ");
+                    sw.Write(name);
+                    sw.WriteLine(" right) => left.Value <= right.Value;");
+                    sw.WriteLine();
+
+                    sw.Write(indentString);
+                    sw.Write("    public static bool operator >(");
+                    sw.Write(name);
+                    sw.Write(" left, ");
+                    sw.Write(name);
+                    sw.WriteLine(" right) => left.Value > right.Value;");
+                    sw.WriteLine();
+
+                    sw.Write(indentString);
+                    sw.Write("    public static bool operator >=(");
+                    sw.Write(name);
+                    sw.Write(" left, ");
+                    sw.Write(name);
+                    sw.WriteLine(" right) => left.Value >= right.Value;");
+                    sw.WriteLine();
+
+                    if (IsTransparentStructHandle(kind))
+                    {
+                        // Handle like transparent structs can be cast to/from void*
+
+                        sw.Write(indentString);
+                        sw.Write("    public static explicit operator ");
+                        sw.Write(name);
+                        sw.Write("(void* value) => new ");
+                        sw.Write(name);
+
+                        if (type == "void*")
+                        {
+                            sw.WriteLine("(value);");
+                        }
+                        else
+                        {
+                            sw.Write("((");
+                            sw.Write(type);
+                            sw.WriteLine(")(value));");
+                        }
+                        sw.WriteLine();
+
+                        sw.Write(indentString);
+                        sw.Write("    public static implicit operator void*(");
+                        sw.Write(name);
+
+                        if (isTypePointer)
+                        {
+                            sw.WriteLine(" value) => value.Value;");
+                        }
+                        else
+                        {
+                            sw.WriteLine(" value) => (void*)(value.Value);");
+                        }
+
+                        sw.WriteLine();
+
+                        if ((kind == PInvokeGeneratorTransparentStructKind.HandleWin32) && (name != "HANDLE"))
+                        {
+                            // Win32 handle like transparent structs can also be cast to/from HANDLE
+
+                            sw.Write(indentString);
+                            sw.Write("    public static explicit operator ");
+                            sw.Write(name);
+                            sw.Write("(HANDLE value) => new ");
+                            sw.Write(name);
+                            sw.WriteLine("(value);");
+                            sw.WriteLine();
+
+                            sw.Write(indentString);
+                            sw.Write("    public static implicit operator HANDLE(");
+                            sw.Write(name);
+                            sw.WriteLine(" value) => new HANDLE(value.Value);");
+                            sw.WriteLine();
+                        }
+                    }
+                    else if (IsTransparentStructBoolean(kind))
+                    {
+                        // Boolean like transparent structs define conversion to/from bool
+                        // and support for usage in bool like scenarios.
+
+                        sw.Write(indentString);
+                        sw.Write("    public static implicit operator bool(");
+                        sw.Write(name);
+                        sw.WriteLine(" value) => value.Value != 0;");
+                        sw.WriteLine();
+
+                        sw.Write(indentString);
+                        sw.Write("    public static implicit operator ");
+                        sw.Write(name);
+                        sw.Write("(bool value) => new ");
+                        sw.Write(name);
+
+                        if (type == "int")
+                        {
+                            sw.WriteLine("(value ? 1 : 0);");
+                        }
+                        else if (type == "uint")
+                        {
+                            sw.WriteLine("(value ? 1u : 0u);");
+                        }
+                        else
+                        {
+                            sw.Write("((");
+                            sw.Write(type);
+                            sw.WriteLine(")(value ? 1u : 0u);");
+                        }
+
+                        sw.WriteLine();
+
+                        sw.Write(indentString);
+                        sw.Write("    public static bool operator false(");
+                        sw.Write(name);
+                        sw.WriteLine(" value) => value.Value == 0;");
+                        sw.WriteLine();
+
+                        sw.Write(indentString);
+                        sw.Write("    public static bool operator true(");
+                        sw.Write(name);
+                        sw.WriteLine(" value) => value.Value != 0;");
+                        sw.WriteLine();
+                    }
+
+                    // All transparent structs define casts to/from the various integer types
+
+                    OutputConversions(sw, indentString, name, type, kind, "byte");
+                    OutputConversions(sw, indentString, name, type, kind, "short");
+                    OutputConversions(sw, indentString, name, type, kind, "int");
+                    OutputConversions(sw, indentString, name, type, kind, "long");
+                    OutputConversions(sw, indentString, name, type, kind, "nint");
+                    OutputConversions(sw, indentString, name, type, kind, "sbyte");
+                    OutputConversions(sw, indentString, name, type, kind, "ushort");
+                    OutputConversions(sw, indentString, name, type, kind, "uint");
+                    OutputConversions(sw, indentString, name, type, kind, "ulong");
+                    OutputConversions(sw, indentString, name, type, kind, "nuint");
+
+                    // All transparent structs override CompareTo, Equals, GetHashCode, and ToString
+
+                    sw.Write(indentString);
+                    sw.WriteLine("    public int CompareTo(object? obj)");
+                    sw.Write(indentString);
+                    sw.WriteLine("    {");
+                    sw.Write(indentString);
+                    sw.Write("            if (obj is ");
+                    sw.Write(name);
+                    sw.WriteLine(" other)");
+                    sw.Write(indentString);
+                    sw.WriteLine("        {");
+                    sw.Write(indentString);
+                    sw.WriteLine("            return CompareTo(other);");
+                    sw.Write(indentString);
+                    sw.WriteLine("        }");
+                    sw.WriteLine();
+                    sw.Write(indentString);
+                    sw.Write("        return (obj is null) ? 1 : throw new ArgumentException(\"obj is not an instance of ");
+                    sw.Write(name);
+                    sw.WriteLine(".\");");
+                    sw.Write(indentString);
+                    sw.WriteLine("    }");
+                    sw.WriteLine();
+
+                    sw.Write(indentString);
+                    sw.Write("    public int CompareTo(");
+                    sw.Write(name);
+
+                    if (isTypePointer)
+                    {
+                        sw.WriteLine(" other) => ((nuint)(Value)).CompareTo((nuint)(other.Value));");
+                    }
+                    else
+                    {
+                        sw.WriteLine(" other) => Value.CompareTo(other.Value);");
+                    }
+
+                    sw.WriteLine();
+
+                    sw.Write(indentString);
+                    sw.Write("    public override bool Equals(object? obj) => (obj is ");
+                    sw.Write(name);
+                    sw.WriteLine(" other) && Equals(other);");
+                    sw.WriteLine();
+
+                    sw.Write(indentString);
+                    sw.Write("    public bool Equals(");
+                    sw.Write(name);
+
+                    if (isTypePointer)
+                    {
+                        sw.WriteLine(" other) => ((nuint)(Value)).Equals((nuint)(other.Value));");
+                    }
+                    else
+                    {
+                        sw.WriteLine(" other) => Value.Equals(other.Value);");
+                    }
+
+                    sw.WriteLine();
+
+                    sw.Write(indentString);
+                    sw.Write("    public override int GetHashCode() => ");
+
+                    if (isTypePointer)
+                    {
+                        sw.Write("((nuint)(Value))");
+                    }
+                    else
+                    {
+                        sw.Write("Value");
+                    }
+
+                    sw.WriteLine(".GetHashCode();");
+                    sw.WriteLine();
+
+                    sw.Write(indentString);
+                    sw.Write("    public override string ToString() => ");
+
+                    if (isTypePointer)
+                    {
+                        sw.Write("((nuint)(Value))");
+                    }
+                    else
+                    {
+                        sw.Write("Value");
+                    }
+
+                    sw.Write(".ToString(");
+
+                    if (IsTransparentStructHexBased(kind))
+                    {
+                        var (typeSrcSize, typeDstSize, typeSign) = GetSizeAndSignOf(type);
+
+                        if (typeSrcSize != typeDstSize)
+                        {
+                            sw.Write("(sizeof(nint) == 4) ? \"X8\" : \"X16\"");
+                        }
+                        else
+                        {
+                            sw.Write('"');
+                            sw.Write('X');
+                            sw.Write(typeSrcSize * 2);
+                            sw.Write('"');
+                        }
+                    }
+
+                    sw.WriteLine(");");
+                    sw.WriteLine();
+
+                    sw.Write(indentString);
+                    sw.Write("    public string ToString(string? format, IFormatProvider? formatProvider) => ");
+
+                    if (isTypePointer)
+                    {
+                        sw.Write("((nuint)(Value))");
+                    }
+                    else
+                    {
+                        sw.Write("Value");
+                    }
+
+                    sw.WriteLine(".ToString(format, formatProvider);");
+
+                    sw.Write(indentString);
+                    sw.WriteLine('}');
+
+                    if (!generator.Config.GenerateFileScopedNamespaces)
+                    {
+                        sw.WriteLine('}');
+                    }
+                }
+
+                static (int srcSize, int dstSize, int sign) GetSizeAndSignOf(string type)
+                {
+                    if (type.Contains('*'))
+                    {
+                        return (8, 4, +1);
+                    }
+
+                    return type switch {
+                        "sbyte" => (1, 1, -1),
+                        "byte" => (1, 1, +1),
+                        "short" => (2, 2, -1),
+                        "ushort" => (2, 2, +1),
+                        "int" => (4, 4, -1),
+                        "uint" => (4, 4, +1),
+                        "nint" => (8, 4, -1),
+                        "nuint" => (8, 4, +1),
+                        "long" => (8, 8, -1),
+                        "ulong" => (8, 8, +1),
+                        _ => (0, 0, 0),
+                    };
+                }
+
+                static void OutputConversions(StreamWriter sw, string indentString, string name, string type, PInvokeGeneratorTransparentStructKind kind, string target)
+                {
+                    var (typeSrcSize, typeDstSize, typeSign) = GetSizeAndSignOf(type);
+                    var (targetSrcSize, targetDstSize, targetSign) = GetSizeAndSignOf(target);
+
+                    var isTypePointer = type.Contains('*');
+                    var isPointerToNativeCast = (isTypePointer && target == "nint") || (isTypePointer && target == "nuint");
+
+                    // public static castFromKind operator name(target value) => new name((type)(value));
+
+                    var castFromKind = "implicit";
+                    var areEquivalentTypeAndTarget = (type == target) || isPointerToNativeCast
+                        || ((type == "nint") && (target == "int")) || ((type == "nuint") && (target == "uint"))
+                        || ((type == "long") && (target == "nint")) || ((type == "ulong") && (target == "nuint"));
+
+                    if (((typeDstSize <= targetSrcSize) && !areEquivalentTypeAndTarget) || ((targetSign == -1) && (typeSign == +1)) || IsTransparentStructHandle(kind))
+                    {
+                        castFromKind = "explicit";
+                    }
+
+                    sw.Write(indentString);
+                    sw.Write("    public static ");
+                    sw.Write(castFromKind);
+                    sw.Write(" operator ");
+                    sw.Write(name);
+                    sw.Write('(');
+                    sw.Write(target);
+                    sw.Write(" value) => new ");
+                    sw.Write(name);
+                    sw.Write('(');
+
+                    if ((castFromKind == "explicit") || isPointerToNativeCast)
+                    {
+                        sw.Write('(');
+                        sw.Write(type);
+                        sw.Write(")(");
+                    }
+
+                    sw.Write("value");
+
+                    if ((castFromKind == "explicit") || isPointerToNativeCast)
+                    {
+                        sw.Write(')');
+                    }
+
+                    sw.WriteLine(");");
+                    sw.WriteLine();
+
+                    // public static castToKind operator target(name value) => ((target)(value.Value));
+
+                    var castToKind = "implicit";
+                    areEquivalentTypeAndTarget = (type == target) || isPointerToNativeCast
+                        || ((type == "int") && (target == "nint")) || ((type == "uint") && (target == "nuint"))
+                        || ((type == "nint") && (target == "long")) || ((type == "nuint") && (target == "ulong"));
+
+                    if (((targetDstSize <= typeSrcSize) && !areEquivalentTypeAndTarget) || ((typeSign == -1) && (targetSign == +1)))
+                    {
+                        castToKind = "explicit";
+                    }
+
+                    sw.Write(indentString);
+                    sw.Write("    public static ");
+                    sw.Write(castToKind);
+                    sw.Write(" operator ");
+                    sw.Write(target);
+                    sw.Write('(');
+                    sw.Write(name);
+                    sw.Write(" value) => ");
+
+                    if ((castToKind == "explicit") || isPointerToNativeCast)
+                    {
+                        sw.Write('(');
+                        sw.Write(target);
+                        sw.Write(")(");
+                    }
+
+                    sw.Write("value.Value");
+
+                    if ((castToKind == "explicit") || isPointerToNativeCast)
+                    {
+                        sw.Write(')');
+                    }
+
+                    sw.WriteLine(';');
+                    sw.WriteLine();
+                }
+            }
         }
 
         public void Dispose()
@@ -361,12 +1285,136 @@ namespace ClangSharp
                 {
                     Visit(translationUnit.TranslationUnitDecl);
                 }
+
+                if (_config.LogPotentialTypedefRemappings)
+                {
+                    foreach (var kvp in _traversedValidNameRemappings)
+                    {
+                        var name = kvp.Key;
+                        var remappings = kvp.Value;
+
+                        if (!_config.RemappedNames.TryGetValue(name, out var remappedName))
+                        {
+                            AddDiagnostic(DiagnosticLevel.Info, $"Potential missing remapping '{name}'. {GetFoundRemappingString(name, remappings)}");
+                        }
+                    }
+
+                    foreach (var kvp in _allValidNameRemappings)
+                    {
+                        var name = kvp.Key;
+                        var remappings = kvp.Value;
+
+                        if (_config.RemappedNames.TryGetValue(name, out var remappedName) && !remappings.Contains(remappedName) && (name != remappedName) && !_config.ForceRemappedNames.Contains(name))
+                        {
+                            AddDiagnostic(DiagnosticLevel.Info, $"Potential invalid remapping '{name}={remappedName}'. {GetFoundRemappingString(name, remappings)}");
+                        }
+                    }
+
+                    foreach (var name in _usedRemappings)
+                    {
+                        var remappedName = _config.RemappedNames[name];
+
+                        if (!_allValidNameRemappings.ContainsKey(name) && (name != remappedName) && !_config.ForceRemappedNames.Contains(name))
+                        {
+                            AddDiagnostic(DiagnosticLevel.Info, $"Potential invalid remapping '{name}={remappedName}'. No remappings were found.");
+                        }
+                    }
+
+                    static string GetFoundRemappingString(string name, HashSet<string> remappings)
+                    {
+                        var recommendedRemapping = "";
+
+                        if (remappings.Count == 1)
+                        {
+                            recommendedRemapping = remappings.Single();
+                        }
+
+                        if ((recommendedRemapping == "") && name.StartsWith("_"))
+                        {
+                            var remapping = name[1..];
+
+                            if (remappings.Contains(remapping))
+                            {
+                                recommendedRemapping = remapping;
+                            }
+                        }
+
+                        if ((recommendedRemapping == "") && name.StartsWith("tag"))
+                        {
+                            var remapping = name[3..];
+
+                            if (remappings.Contains(remapping))
+                            {
+                                recommendedRemapping = remapping;
+                            }
+                        }
+
+                        if ((recommendedRemapping == "") && name.EndsWith("_"))
+                        {
+                            var remapping = name[0..^1];
+
+                            if (remappings.Contains(remapping))
+                            {
+                                recommendedRemapping = remapping;
+                            }
+                        }
+
+                        if ((recommendedRemapping == "") && name.EndsWith("tag"))
+                        {
+                            var remapping = name[0..^3];
+
+                            if (remappings.Contains(remapping))
+                            {
+                                recommendedRemapping = remapping;
+                            }
+                        }
+
+                        if (recommendedRemapping == "")
+                        {
+                            var remapping = name.ToUpperInvariant();
+
+                            if (remappings.Contains(remapping))
+                            {
+                                recommendedRemapping = remapping;
+                            }
+                        }
+
+                        var result = "";
+                        var remainingRemappings = (IEnumerable<string>)remappings;
+                        var remainingString = "Found";
+
+                        if (recommendedRemapping != "")
+                        {
+                            result += $"Recommended remapping: '{name}={recommendedRemapping}'.";
+
+                            if (remappings.Count == 1)
+                            {
+                                remainingRemappings = Array.Empty<string>();
+                            }
+                            else
+                            {
+                                result += ' ';
+                                remainingRemappings = remappings.Except(new string[] { recommendedRemapping });
+                                remainingString = "Other";
+                            }
+                        }
+
+                        if (remainingRemappings.Any())
+                        {
+                            result += $"{remainingString} typedefs: {string.Join("; ", remainingRemappings)}";
+                        }
+
+                        return result;
+                    }
+                }
             }
             catch (Exception e)
             {
                 var diagnostic = new Diagnostic(DiagnosticLevel.Error, e.ToString());
                 _diagnostics.Add(diagnostic);
             }
+
+            GC.KeepAlive(translationUnit);
         }
 
         private void AddDiagnostic(DiagnosticLevel level, string message)
@@ -415,6 +1463,19 @@ namespace ClangSharp
                     if (_config.HeaderText != string.Empty)
                     {
                         sw.WriteLine(_config.HeaderText);
+                    }
+
+                    if (isMethodClass)
+                    {
+                        var nonTestName = outputBuilder.IsTestOutput ? outputBuilder.Name[0..^5] : outputBuilder.Name;
+
+                        if (_topLevelClassUsings.TryGetValue(nonTestName, out var withUsings))
+                        {
+                            foreach (var withUsing in withUsings)
+                            {
+                                csharpOutputBuilder.AddUsingDirective(withUsing);
+                            }
+                        }
                     }
 
                     var usingDirectives = csharpOutputBuilder.UsingDirectives.Concat(csharpOutputBuilder.StaticUsingDirectives);
@@ -469,19 +1530,29 @@ namespace ClangSharp
             void ForCSharp(CSharpOutputBuilder csharpOutputBuilder)
             {
                 var indentationString = csharpOutputBuilder.IndentationString;
+                var nonTestName = outputBuilder.IsTestOutput ? outputBuilder.Name[0..^5] : outputBuilder.Name;
 
                 if (emitNamespaceDeclaration)
                 {
                     sw.Write("namespace ");
-                    sw.Write(Config.Namespace);
+                    sw.Write(GetNamespace(nonTestName));
 
                     if (csharpOutputBuilder.IsTestOutput)
                     {
                         sw.Write(".UnitTests");
                     }
 
-                    sw.WriteLine();
-                    sw.WriteLine('{');
+                    if (Config.GenerateFileScopedNamespaces)
+                    {
+                        sw.WriteLine(';');
+                        sw.WriteLine();
+                        indentationString = "";
+                    }
+                    else
+                    {
+                        sw.WriteLine();
+                        sw.WriteLine('{');
+                    }
                 }
                 else
                 {
@@ -490,18 +1561,80 @@ namespace ClangSharp
 
                 if (isMethodClass)
                 {
-                    sw.Write(indentationString);
-                    sw.Write("public static ");
+                    var isTopLevelStruct = _config.WithTypes.TryGetValue(nonTestName, out var withType) && (withType == "struct");
 
-                    if (_isMethodClassUnsafe)
+                    if (outputBuilder.IsTestOutput)
+                    {
+                        sw.Write(indentationString);
+                        sw.Write("/// <summary>Provides validation of the <see cref=\"");
+                        sw.Write(nonTestName);
+                        sw.Write("\" /> ");
+
+                        if (isTopLevelStruct)
+                        {
+                            sw.Write("struct");
+                        }
+                        else
+                        {
+                            sw.Write("class");
+                        }
+
+                        sw.WriteLine(".</summary>");
+                    }
+
+                    if (_topLevelClassAttributes.TryGetValue(nonTestName, out var withAttributes))
+                    {
+                        if (withAttributes.Any())
+                        {
+                            foreach (var attribute in withAttributes)
+                            {
+                                if (outputBuilder.IsTestOutput && !attribute.StartsWith("SupportedOSPlatform("))
+                                {
+                                    continue;
+                                }
+
+                                sw.Write(indentationString);
+                                sw.Write('[');
+                                sw.Write(attribute);
+                                sw.WriteLine(']');
+                            }
+                        }
+                    }
+
+                    sw.Write(indentationString);
+                    sw.Write("public ");
+
+                    if (outputBuilder.IsTestOutput || !isTopLevelStruct)
+                    {
+                        sw.Write("static ");
+                    }
+
+                    if ((_isTopLevelClassUnsafe.TryGetValue(nonTestName, out var isUnsafe) && isUnsafe) || (outputBuilder.IsTestOutput && isTopLevelStruct))
                     {
                         sw.Write("unsafe ");
                     }
 
-                    sw.Write("partial class ");
-                    sw.WriteLine(Config.MethodClassName);
+                    sw.Write("partial ");
+
+                    if (!outputBuilder.IsTestOutput && isTopLevelStruct)
+                    {
+                        sw.Write("struct ");
+                    }
+                    else
+                    {
+                        sw.Write("class ");
+                    }
+
+                    sw.Write(outputBuilder.Name);
+
+                    sw.WriteLine();
                     sw.Write(indentationString);
-                    sw.WriteLine('{');
+                    sw.Write('{');
+
+                    if ((!outputBuilder.IsTestOutput && !isTopLevelStruct) || !string.IsNullOrEmpty(csharpOutputBuilder.Contents.First()))
+                    {
+                        sw.WriteLine();
+                    }
 
                     indentationString += csharpOutputBuilder.IndentationString;
                 }
@@ -521,11 +1654,13 @@ namespace ClangSharp
 
                 if (isMethodClass)
                 {
-                    sw.Write(csharpOutputBuilder.IndentationString);
+                    indentationString = indentationString[..^csharpOutputBuilder.IndentationString.Length];
+
+                    sw.Write(indentationString);
                     sw.WriteLine('}');
                 }
 
-                if (_config.GenerateMultipleFiles)
+                if (_config.GenerateMultipleFiles && !Config.GenerateFileScopedNamespaces)
                 {
                     sw.WriteLine('}');
                 }
@@ -540,7 +1675,7 @@ namespace ClangSharp
                 {
                     sw.Write(indentationString);
                     sw.Write("<namespace name=\"");
-                    sw.Write(Config.Namespace);
+                    sw.Write(GetNamespace(xmlOutputBuilder.Name));
                     sw.WriteLine("\">");
                 }
 
@@ -550,10 +1685,10 @@ namespace ClangSharp
                 {
                     sw.Write(indentationString);
                     sw.Write("<class name=\"");
-                    sw.Write(Config.MethodClassName);
+                    sw.Write(xmlOutputBuilder.Name);
                     sw.Write("\" access=\"public\" static=\"true\"");
 
-                    if (_isMethodClassUnsafe)
+                    if (_isTopLevelClassUnsafe.TryGetValue(xmlOutputBuilder.Name, out var isUnsafe) && isUnsafe)
                     {
                         sw.Write(" unsafe=\"true\"");
                     }
@@ -577,14 +1712,14 @@ namespace ClangSharp
 
                 if (isMethodClass)
                 {
-                    indentationString = indentationString.Substring(0, indentationString.Length - Indent.Length);
+                    indentationString = indentationString[..^Indent.Length];
                     sw.Write(indentationString);
                     sw.WriteLine("</class>");
                 }
 
                 if (_config.GenerateMultipleFiles)
                 {
-                    indentationString = indentationString.Substring(0, indentationString.Length - Indent.Length);
+                    indentationString = indentationString[..^Indent.Length];
                     sw.Write(indentationString);
                     sw.WriteLine("</namespace>");
                     sw.WriteLine("</bindings>");
@@ -736,54 +1871,62 @@ namespace ClangSharp
             return EscapeName(name);
         }
 
-        internal static string EscapeCharacter(char value) => EscapeString(value.ToString());
+        internal static string EscapeCharacter(char value) => value switch {
+            '\\' => "\\\\",
+            '\r' => "\\r",
+            '\n' => "\\n",
+            '\t' => "\\t",
+            '\'' => "\\'",
+            _ => value.ToString(),
+        };
 
         internal static string EscapeString(string value) => value.Replace("\\", "\\\\")
-                                                                 .Replace("\r", "\\r")
-                                                                 .Replace("\n", "\\n")
-                                                                 .Replace("\t", "\\t")
-                                                                 .Replace("\"", "\\\"");
+                                                                  .Replace("\r", "\\r")
+                                                                  .Replace("\n", "\\n")
+                                                                  .Replace("\t", "\\t")
+                                                                  .Replace("\"", "\\\"");
 
         private AccessSpecifier GetAccessSpecifier(NamedDecl namedDecl)
         {
-            AccessSpecifier name;
-
-            switch (namedDecl.Access)
+            if (!TryGetRemappedValue(namedDecl, _config.WithAccessSpecifiers, out var accessSpecifier) || (accessSpecifier == AccessSpecifier.None))
             {
-                case CX_CXXAccessSpecifier.CX_CXXInvalidAccessSpecifier:
+                switch (namedDecl.Access)
                 {
-                    // Top level declarations will have an invalid access specifier
-                    name = AccessSpecifier.Public;
-                    break;
-                }
+                    case CX_CXXAccessSpecifier.CX_CXXInvalidAccessSpecifier:
+                    {
+                        // Top level declarations will have an invalid access specifier
+                        accessSpecifier = AccessSpecifier.Public;
+                        break;
+                    }
 
-                case CX_CXXAccessSpecifier.CX_CXXPublic:
-                {
-                    name = AccessSpecifier.Public;
-                    break;
-                }
+                    case CX_CXXAccessSpecifier.CX_CXXPublic:
+                    {
+                        accessSpecifier = AccessSpecifier.Public;
+                        break;
+                    }
 
-                case CX_CXXAccessSpecifier.CX_CXXProtected:
-                {
-                    name = AccessSpecifier.Protected;
-                    break;
-                }
+                    case CX_CXXAccessSpecifier.CX_CXXProtected:
+                    {
+                        accessSpecifier = AccessSpecifier.Protected;
+                        break;
+                    }
 
-                case CX_CXXAccessSpecifier.CX_CXXPrivate:
-                {
-                    name = AccessSpecifier.Private;
-                    break;
-                }
+                    case CX_CXXAccessSpecifier.CX_CXXPrivate:
+                    {
+                        accessSpecifier = AccessSpecifier.Private;
+                        break;
+                    }
 
-                default:
-                {
-                    name = AccessSpecifier.Internal;
-                    AddDiagnostic(DiagnosticLevel.Warning, $"Unknown access specifier: '{namedDecl.Access}'. Falling back to '{name}'.", namedDecl);
-                    break;
+                    default:
+                    {
+                        accessSpecifier = AccessSpecifier.Internal;
+                        AddDiagnostic(DiagnosticLevel.Warning, $"Unknown access specifier: '{namedDecl.Access}'. Falling back to '{accessSpecifier}'.", namedDecl);
+                        break;
+                    }
                 }
             }
 
-            return name;
+            return accessSpecifier;
         }
 
         private static string GetAnonymousName(Cursor cursor, string kind)
@@ -854,86 +1997,187 @@ namespace ClangSharp
             return types.ToArray();
         }
 
-        private CallingConvention GetCallingConvention(Cursor cursor, CXCallingConv callingConvention, string remappedName)
+        private CallingConvention GetCallingConvention(Cursor cursor, Cursor context, Type type)
         {
+            if (cursor is NamedDecl namedDecl)
+            {
+                if (TryGetRemappedValue(namedDecl, _config.WithCallConvs, out var callConv, matchStar: true))
+                {
+                    if (Enum.TryParse<CallingConvention>(callConv, true, out var remappedCallingConvention))
+                    {
+                        return remappedCallingConvention;
+                    }
+                    AddDiagnostic(DiagnosticLevel.Warning, $"Unsupported manually-specified calling convention: '{callConv}'. Determining convention from cursor.", cursor);
+                }
+            }
+
+            var wasRemapped = false;
+            return GetCallingConvention(cursor, context, type, ref wasRemapped);
+        }
+
+        private CallingConvention GetCallingConvention(Cursor cursor, Cursor context, Type type, ref bool wasRemapped)
+        {
+            var remappedName = GetRemappedTypeName(cursor, context, type, out _, ignoreTransparentStructsWhereRequired: false, skipUsing: true);
+
             if (_config.WithCallConvs.TryGetValue(remappedName, out var callConv) || _config.WithCallConvs.TryGetValue("*", out callConv))
             {
-                if (Enum.TryParse(callConv, true, out CallingConvention callConvEnum))
+                if (Enum.TryParse<CallingConvention>(callConv, true, out var remappedCallingConvention))
                 {
-                    return callConvEnum;
+                    wasRemapped = true;
+                    return remappedCallingConvention;
                 }
-
                 AddDiagnostic(DiagnosticLevel.Warning, $"Unsupported manually-specified calling convention: '{callConv}'. Determining convention from cursor.", cursor);
             }
 
-            switch (callingConvention)
+            if (type is AttributedType attributedType)
             {
-                case CXCallingConv.CXCallingConv_C:
+                var callingConvention = GetCallingConvention(cursor, context, attributedType.ModifiedType, ref wasRemapped);
+
+                if (wasRemapped)
                 {
-                    return CallingConvention.Cdecl;
+                    return callingConvention;
                 }
 
-                case CXCallingConv.CXCallingConv_X86StdCall:
+                switch (attributedType.AttrKind)
                 {
-                    return CallingConvention.StdCall;
-                }
+                    case CX_AttrKind.CX_AttrKind_MSABI:
+                    case CX_AttrKind.CX_AttrKind_SysVABI:
+                    {
+                        return CallingConvention.Winapi;
+                    }
 
-                case CXCallingConv.CXCallingConv_X86FastCall:
-                {
-                    return CallingConvention.FastCall;
-                }
+                    case CX_AttrKind.CX_AttrKind_CDecl:
+                    {
+                        return CallingConvention.Cdecl;
+                    }
 
-                case CXCallingConv.CXCallingConv_X86ThisCall:
-                {
-                    return CallingConvention.ThisCall;
-                }
+                    case CX_AttrKind.CX_AttrKind_FastCall:
+                    {
+                        return CallingConvention.FastCall;
+                    }
 
-                case CXCallingConv.CXCallingConv_Win64:
-                {
-                    return CallingConvention.Winapi;
-                }
+                    case CX_AttrKind.CX_AttrKind_StdCall:
+                    {
+                        return CallingConvention.StdCall;
+                    }
 
-                default:
-                {
-                    const CallingConvention Name = CallingConvention.Winapi;
-                    AddDiagnostic(DiagnosticLevel.Warning, $"Unsupported calling convention: '{callingConvention}'. Falling back to '{Name}'.", cursor);
-                    return Name;
+                    case CX_AttrKind.CX_AttrKind_ThisCall:
+                    {
+                        return CallingConvention.ThisCall;
+                    }
+
+                    case CX_AttrKind.CX_AttrKind_AArch64VectorPcs:
+                    case CX_AttrKind.CX_AttrKind_Pcs:
+                    case CX_AttrKind.CX_AttrKind_PreserveAll:
+                    case CX_AttrKind.CX_AttrKind_PreserveMost:
+                    case CX_AttrKind.CX_AttrKind_RegCall:
+                    case CX_AttrKind.CX_AttrKind_VectorCall:
+                    {
+                        AddDiagnostic(DiagnosticLevel.Warning, $"Unsupported calling convention: '{attributedType.AttrKind}'.", cursor);
+                        return callingConvention;
+                    }
+
+                    default:
+                    {
+                        return callingConvention;
+                    }
                 }
+            }
+            else if (type is FunctionType functionType)
+            {
+                var callingConv = functionType.CallConv;
+
+                switch (callingConv)
+                {
+                    case CXCallingConv.CXCallingConv_C:
+                    {
+                        if ((cursor is CXXMethodDecl cxxMethodDecl) && cxxMethodDecl.IsInstance)
+                        {
+                            return CallingConvention.ThisCall;
+                        }
+                        return CallingConvention.Cdecl;
+                    }
+
+                    case CXCallingConv.CXCallingConv_X86StdCall:
+                    {
+                        return CallingConvention.StdCall;
+                    }
+
+                    case CXCallingConv.CXCallingConv_X86FastCall:
+                    {
+                        return CallingConvention.FastCall;
+                    }
+
+                    case CXCallingConv.CXCallingConv_X86ThisCall:
+                    {
+                        return CallingConvention.ThisCall;
+                    }
+
+                    case CXCallingConv.CXCallingConv_Win64:
+                    {
+                        return CallingConvention.Winapi;
+                    }
+
+                    default:
+                    {
+                        const CallingConvention Name = CallingConvention.Winapi;
+                        AddDiagnostic(DiagnosticLevel.Warning, $"Unsupported calling convention: '{callingConv}'. Falling back to '{Name}'.", cursor);
+                        return Name;
+                    }
+                }
+            }
+            else if (type is PointerType pointerType)
+            {
+                return GetCallingConvention(cursor, context, pointerType.PointeeType, ref wasRemapped);
+            }
+            else if (type is TypedefType typedefType)
+            {
+                return GetCallingConvention(cursor, context, typedefType.Decl.UnderlyingType, ref wasRemapped);
+            }
+            else
+            {
+                AddDiagnostic(DiagnosticLevel.Warning, $"Unsupported type: '{type.TypeClass}'. Falling back to canonical type.", cursor);
+                return GetCallingConvention(cursor, context, type.CanonicalType, ref wasRemapped);
             }
         }
 
         private string GetCursorName(NamedDecl namedDecl)
         {
-            var name = namedDecl.Name.Replace('\\', '/');
+            if (!_cursorNames.TryGetValue(namedDecl, out var name))
+            {
+                name = namedDecl.Name.Replace('\\', '/');
 
-            if (namedDecl is CXXConstructorDecl cxxConstructorDecl)
-            {
-                name = GetCursorName(cxxConstructorDecl.Parent);
-            }
-            else if (namedDecl is CXXDestructorDecl)
-            {
-                name = "Dispose";
-            }
-            else if (string.IsNullOrWhiteSpace(name))
-            {
-                if (namedDecl is TypeDecl typeDecl)
+                if (namedDecl is CXXConstructorDecl cxxConstructorDecl)
                 {
-                    name = (typeDecl is TagDecl tagDecl) && tagDecl.Handle.IsAnonymous
-                         ? GetAnonymousName(tagDecl, tagDecl.TypeForDecl.KindSpelling)
-                         : GetTypeName(namedDecl, context: null, typeDecl.TypeForDecl, out _);
+                    name = GetCursorName(cxxConstructorDecl.Parent);
                 }
-                else if (namedDecl is ParmVarDecl)
+                else if (namedDecl is CXXDestructorDecl)
                 {
-                    name = "param";
+                    name = "Dispose";
                 }
-                else if (namedDecl is FieldDecl fieldDecl)
+                else if (string.IsNullOrWhiteSpace(name))
                 {
-                    name = GetAnonymousName(fieldDecl, fieldDecl.CursorKindSpelling);
+                    if (namedDecl is TypeDecl typeDecl)
+                    {
+                        name = (typeDecl is TagDecl tagDecl) && tagDecl.Handle.IsAnonymous
+                             ? GetAnonymousName(tagDecl, tagDecl.TypeForDecl.KindSpelling)
+                             : GetTypeName(namedDecl, context: null, typeDecl.TypeForDecl, ignoreTransparentStructsWhereRequired: false, out _);
+                    }
+                    else if (namedDecl is ParmVarDecl)
+                    {
+                        name = "param";
+                    }
+                    else if (namedDecl is FieldDecl fieldDecl)
+                    {
+                        name = GetAnonymousName(fieldDecl, fieldDecl.CursorKindSpelling);
+                    }
+                    else
+                    {
+                        AddDiagnostic(DiagnosticLevel.Error, $"Unsupported anonymous named declaration: '{namedDecl.DeclKindName}'.", namedDecl);
+                    }
                 }
-                else
-                {
-                    AddDiagnostic(DiagnosticLevel.Error, $"Unsupported anonymous named declaration: '{namedDecl.DeclKindName}'.", namedDecl);
-                }
+
+                _cursorNames[namedDecl] = name;
             }
 
             Debug.Assert(!string.IsNullOrWhiteSpace(name));
@@ -942,36 +2186,43 @@ namespace ClangSharp
 
         private string GetCursorQualifiedName(NamedDecl namedDecl, bool truncateFunctionParameters = false)
         {
-            var parts = new Stack<NamedDecl>();
-            Decl decl = namedDecl;
-
-            do
+            if (!_cursorQualifiedNames.TryGetValue((namedDecl, truncateFunctionParameters), out var qualifiedName))
             {
-                if (decl is NamedDecl parentNamedDecl)
+                var parts = new Stack<NamedDecl>();
+                Decl decl = namedDecl;
+
+                do
                 {
-                    parts.Push(parentNamedDecl);
+                    if (decl is NamedDecl parentNamedDecl)
+                    {
+                        parts.Push(parentNamedDecl);
+                    }
+
+                    decl = (decl.DeclContext is null) && (decl is CXXMethodDecl cxxMethodDecl)
+                        ? cxxMethodDecl.ThisObjectType.AsCXXRecordDecl
+                        : (Decl)decl.DeclContext;
+                }
+                while (decl != null);
+
+                var qualifiedNameBuilder = new StringBuilder();
+
+                var part = parts.Pop();
+
+                while (parts.Count != 0)
+                {
+                    AppendNamedDecl(part, GetCursorName(part), qualifiedNameBuilder);
+                    _ = qualifiedNameBuilder.Append("::");
+                    part = parts.Pop();
                 }
 
-                decl = (decl.DeclContext is null) && (decl is CXXMethodDecl cxxMethodDecl)
-                    ? cxxMethodDecl.ThisObjectType.AsCXXRecordDecl
-                    : (Decl)decl.DeclContext;
-            }
-            while (decl != null);
+                AppendNamedDecl(part, GetCursorName(part), qualifiedNameBuilder);
 
-            var qualifiedName = new StringBuilder();
-
-            var part = parts.Pop();
-
-            while (parts.Count != 0)
-            {
-                AppendNamedDecl(part, GetCursorName(part), qualifiedName);
-                _ = qualifiedName.Append("::");
-                part = parts.Pop();
+                qualifiedName = qualifiedNameBuilder.ToString();
+                _cursorQualifiedNames[(namedDecl, truncateFunctionParameters)] = qualifiedName;
             }
 
-            AppendNamedDecl(part, GetCursorName(part), qualifiedName);
-
-            return qualifiedName.ToString();
+            Debug.Assert(!string.IsNullOrWhiteSpace(qualifiedName));
+            return qualifiedName;
 
             void AppendFunctionParameters(CXType functionType, StringBuilder qualifiedName)
             {
@@ -1116,7 +2367,46 @@ namespace ClangSharp
             while (true);
         }
 
-        private static CXXRecordDecl GetRecordDeclForBaseSpecifier(CXXBaseSpecifier cxxBaseSpecifier)
+        private uint GetOverloadIndex(CXXMethodDecl cxxMethodDeclToMatch)
+        {
+            if (!_overloadIndices.TryGetValue(cxxMethodDeclToMatch, out var index))
+            {
+                index = GetOverloadIndex(cxxMethodDeclToMatch, cxxMethodDeclToMatch.Parent, baseIndex: 0);
+                _overloadIndices.Add(cxxMethodDeclToMatch, index);
+            }
+            return index;
+
+            uint GetOverloadIndex(CXXMethodDecl cxxMethodDeclToMatch, CXXRecordDecl cxxRecordDecl, uint baseIndex)
+            {
+                var index = baseIndex;
+
+                foreach (var cxxBaseSpecifier in cxxRecordDecl.Bases)
+                {
+                    var baseCxxRecordDecl = GetRecordDecl(cxxBaseSpecifier);
+                    index = GetOverloadIndex(cxxMethodDeclToMatch, baseCxxRecordDecl, index);
+                }
+
+                foreach (var cxxMethodDecl in cxxRecordDecl.Methods.OrderBy((cxxmd) => cxxmd.VtblIndex))
+                {
+                    if (IsExcluded(cxxMethodDecl))
+                    {
+                        continue;
+                    }
+                    else if (cxxMethodDecl == cxxMethodDeclToMatch)
+                    {
+                        break;
+                    }
+                    else if (cxxMethodDecl.Name == cxxMethodDeclToMatch.Name)
+                    {
+                        index++;
+                    }
+                }
+
+                return index;
+            }
+        }
+
+        private static CXXRecordDecl GetRecordDecl(CXXBaseSpecifier cxxBaseSpecifier)
         {
             var baseType = cxxBaseSpecifier.Type;
 
@@ -1150,8 +2440,15 @@ namespace ClangSharp
 
         private string GetRemappedCursorName(NamedDecl namedDecl)
         {
+            return GetRemappedCursorName(namedDecl, out _, skipUsing: false);
+        }
+
+        private string GetRemappedCursorName(NamedDecl namedDecl, out string nativeTypeName, bool skipUsing)
+        {
+            nativeTypeName = GetCursorName(namedDecl);
+
             var name = GetCursorQualifiedName(namedDecl);
-            var remappedName = GetRemappedName(name, namedDecl, tryRemapOperatorName: true, out var wasRemapped);
+            var remappedName = GetRemappedName(name, namedDecl, tryRemapOperatorName: true, out var wasRemapped, skipUsing);
 
             if (wasRemapped)
             {
@@ -1159,7 +2456,7 @@ namespace ClangSharp
             }
 
             name = name.Replace("::", ".");
-            remappedName = GetRemappedName(name, namedDecl, tryRemapOperatorName: true, out wasRemapped);
+            remappedName = GetRemappedName(name, namedDecl, tryRemapOperatorName: true, out wasRemapped, skipUsing);
 
             if (wasRemapped)
             {
@@ -1167,7 +2464,7 @@ namespace ClangSharp
             }
 
             name = GetCursorQualifiedName(namedDecl, truncateFunctionParameters: true);
-            remappedName = GetRemappedName(name, namedDecl, tryRemapOperatorName: true, out wasRemapped);
+            remappedName = GetRemappedName(name, namedDecl, tryRemapOperatorName: true, out wasRemapped, skipUsing);
 
             if (wasRemapped)
             {
@@ -1175,29 +2472,32 @@ namespace ClangSharp
             }
 
             name = name.Replace("::", ".");
-            remappedName = GetRemappedName(name, namedDecl, tryRemapOperatorName: true, out wasRemapped);
+            remappedName = GetRemappedName(name, namedDecl, tryRemapOperatorName: true, out wasRemapped, skipUsing);
 
             if (wasRemapped)
             {
                 return remappedName;
             }
 
-            name = GetCursorName(namedDecl);
-            remappedName = GetRemappedName(name, namedDecl, tryRemapOperatorName: true, out wasRemapped);
+            name = nativeTypeName;
+            remappedName = GetRemappedName(name, namedDecl, tryRemapOperatorName: true, out wasRemapped, skipUsing);
 
             if (wasRemapped)
             {
                 return remappedName;
             }
 
-            if ((namedDecl is FieldDecl fieldDecl) && name.StartsWith("__AnonymousFieldDecl_"))
+            if (namedDecl is FieldDecl fieldDecl)
             {
-                remappedName = "Anonymous";
-
-                if (fieldDecl.Parent.AnonymousFields.Count > 1)
+                if (name.StartsWith("__AnonymousFieldDecl_"))
                 {
-                    var index = fieldDecl.Parent.AnonymousFields.IndexOf(fieldDecl) + 1;
-                    remappedName += index.ToString();
+                    remappedName = "Anonymous";
+
+                    if (fieldDecl.Parent.AnonymousFields.Count > 1)
+                    {
+                        var index = fieldDecl.Parent.AnonymousFields.IndexOf(fieldDecl) + 1;
+                        remappedName += index.ToString();
+                    }
                 }
             }
             else if ((namedDecl is RecordDecl recordDecl) && name.StartsWith("__AnonymousRecord_"))
@@ -1226,18 +2526,31 @@ namespace ClangSharp
             return remappedName;
         }
 
-        private string GetRemappedName(string name, Cursor cursor, bool tryRemapOperatorName, out bool wasRemapped)
+        private string GetRemappedName(string name, Cursor cursor, bool tryRemapOperatorName, out bool wasRemapped, bool skipUsing = false)
+        {
+            return GetRemappedName(name, cursor, tryRemapOperatorName, out wasRemapped, skipUsing, skipUsingIfNotRemapped: skipUsing);
+        }
+
+        private string GetRemappedName(string name, Cursor cursor, bool tryRemapOperatorName, out bool wasRemapped, bool skipUsing, bool skipUsingIfNotRemapped)
         {
             if (_config.RemappedNames.TryGetValue(name, out var remappedName))
             {
                 wasRemapped = true;
-                return AddUsingDirectiveIfNeeded(remappedName);
+                _ = _usedRemappings.Add(name);
+                return AddUsingDirectiveIfNeeded(_outputBuilder, remappedName, skipUsing);
             }
 
-            if (name.StartsWith("const ") && _config.RemappedNames.TryGetValue(name[6..], out remappedName))
+            if (name.StartsWith("const "))
             {
-                wasRemapped = true;
-                return AddUsingDirectiveIfNeeded(remappedName);
+                var tmpName = name[6..];
+
+                if (_config.RemappedNames.TryGetValue(tmpName, out remappedName))
+                {
+
+                    wasRemapped = true;
+                    _ = _usedRemappings.Add(tmpName);
+                    return AddUsingDirectiveIfNeeded(_outputBuilder, remappedName, skipUsing);
+                }
             }
 
             remappedName = name;
@@ -1245,27 +2558,69 @@ namespace ClangSharp
             if ((cursor is FunctionDecl functionDecl) && tryRemapOperatorName && TryRemapOperatorName(ref remappedName, functionDecl))
             {
                 wasRemapped = true;
-                return AddUsingDirectiveIfNeeded(remappedName);
+                // We don't track remapped operators in _usedRemappings
+                return AddUsingDirectiveIfNeeded(_outputBuilder, remappedName, skipUsing);
             }
 
             wasRemapped = false;
-            return AddUsingDirectiveIfNeeded(remappedName);
+            return AddUsingDirectiveIfNeeded(_outputBuilder, remappedName, skipUsingIfNotRemapped);
 
-            string AddUsingDirectiveIfNeeded(string remappedName)
+            string AddUsingDirectiveIfNeeded(IOutputBuilder outputBuilder, string remappedName, bool skipUsing)
             {
-                if (remappedName.Equals("Guid") || remappedName.Equals("IntPtr") || remappedName.Equals("UIntPtr"))
+                if (!skipUsing)
                 {
-                    _outputBuilder?.EmitSystemSupport();
+                    if (s_needsSystemSupportRegex.IsMatch(remappedName))
+                    {
+                        outputBuilder?.EmitSystemSupport();
+                    }
+
+                    var namespaceName = GetNamespace(remappedName);
+                    var needsUsing = false;
+
+                    if (_currentNamespace is not null)
+                    {
+                        if (!_currentNamespace.StartsWith(namespaceName))
+                        {
+                            needsUsing = true;
+                        }
+                        else if ((_currentNamespace.Length > namespaceName.Length) && (_currentNamespace[namespaceName.Length] != '.'))
+                        {
+                            needsUsing = true;
+                        }
+                    }
+
+                    if (needsUsing)
+                    {
+                        outputBuilder?.EmitUsingDirective(namespaceName);
+                    }
                 }
 
                 return remappedName;
             }
         }
 
-        private string GetRemappedTypeName(Cursor cursor, Cursor context, Type type, out string nativeTypeName)
+        private string GetRemappedTypeName(Cursor cursor, Cursor context, Type type, out string nativeTypeName, bool skipUsing = false, bool ignoreTransparentStructsWhereRequired = false)
         {
-            var name = GetTypeName(cursor, context, type, out nativeTypeName);
-            var remappedName = GetRemappedName(name, cursor, tryRemapOperatorName: false, out var wasRemapped);
+            var name = GetTypeName(cursor, context, type, ignoreTransparentStructsWhereRequired, out nativeTypeName);
+
+            var nameToCheck = nativeTypeName;
+            var remappedName = GetRemappedName(nameToCheck, cursor, tryRemapOperatorName: false, out var wasRemapped, skipUsing, skipUsingIfNotRemapped: true);
+
+            if (wasRemapped)
+            {
+                return remappedName;
+            }
+
+            nameToCheck = nameToCheck.Replace("::", ".");
+            remappedName = GetRemappedName(nameToCheck, cursor, tryRemapOperatorName: false, out wasRemapped, skipUsing, skipUsingIfNotRemapped: true);
+
+            if (wasRemapped)
+            {
+                return remappedName;
+            }
+
+            nameToCheck = name;
+            remappedName = GetRemappedName(nameToCheck, cursor, tryRemapOperatorName: false, out wasRemapped, skipUsing);
 
             if (!wasRemapped)
             {
@@ -1324,7 +2679,7 @@ namespace ClangSharp
                 }
                 else if ((canonicalType is EnumType enumType) && remappedName.StartsWith("__AnonymousEnum_"))
                 {
-                    remappedName = GetRemappedTypeName(enumType.Decl, context: null, enumType.Decl.IntegerType, out _);
+                    remappedName = GetRemappedTypeName(enumType.Decl, context: null, enumType.Decl.IntegerType, out _, skipUsing);
                 }
                 else if (cursor is EnumDecl enumDecl)
                 {
@@ -1335,12 +2690,11 @@ namespace ClangSharp
                         remappedName = "uint";
                     }
 
-                    WithType("*", ref remappedName, ref nativeTypeName);
-                    WithType(enumDeclName, ref remappedName, ref nativeTypeName);
+                    WithType(enumDecl, ref remappedName, ref nativeTypeName);
                 }
             }
 
-            if (nativeTypeName.Equals(remappedName) || nativeTypeName.Replace(" ", "").Equals(remappedName))
+            if (IsNativeTypeNameEquivalent(nativeTypeName, remappedName))
             {
                 nativeTypeName = string.Empty;
             }
@@ -1373,345 +2727,445 @@ namespace ClangSharp
 #endif
         }
 
-        private string GetTypeName(Cursor cursor, Cursor context, Type type, out string nativeTypeName)
+        private string GetTargetTypeName(Cursor cursor, out string nativeTypeName)
         {
-            var name = type.AsString.Replace('\\', '/');
-            nativeTypeName = name;
+            var targetTypeName = "";
+            nativeTypeName = "";
 
-            if (type is ArrayType arrayType)
+            if (cursor is Decl decl)
             {
-                name = GetTypeName(cursor, context, arrayType.ElementType, out _);
-
-                if (cursor is FunctionDecl or ParmVarDecl)
+                if (decl is EnumConstantDecl enumConstantDecl)
                 {
-                    name = GetRemappedName(name, cursor, tryRemapOperatorName: false, out _);
-                    name += '*';
+                    if (enumConstantDecl.DeclContext is EnumDecl enumDecl)
+                    {
+                        targetTypeName = GetRemappedTypeName(enumDecl, context: null, enumDecl.IntegerType, out nativeTypeName);
+                    }
+                    else
+                    {
+                        targetTypeName = GetRemappedTypeName(enumConstantDecl, context: null, enumConstantDecl.Type, out nativeTypeName);
+                    }
                 }
-            }
-            else if (type is AttributedType attributedType)
-            {
-                name = GetTypeName(cursor, context, attributedType.ModifiedType, out _);
-            }
-            else if (type is BuiltinType)
-            {
-                switch (type.Kind)
+                else if (decl is TypeDecl previousTypeDecl)
                 {
-                    case CXTypeKind.CXType_Void:
+                    targetTypeName = GetRemappedTypeName(previousTypeDecl, context: null, previousTypeDecl.TypeForDecl, out nativeTypeName);
+                }
+                else if (decl is VarDecl varDecl)
+                {
+                    if (varDecl is ParmVarDecl parmVarDecl)
                     {
-                        name = (cursor is null) ? "Void" : "void";
-                        break;
-                    }
+                        targetTypeName = GetRemappedTypeName(parmVarDecl, context: null, parmVarDecl.Type, out nativeTypeName);
 
-                    case CXTypeKind.CXType_Bool:
-                    {
-                        name = (cursor is null) ? "Boolean" : "bool";
-                        break;
-                    }
-
-                    case CXTypeKind.CXType_Char_U:
-                    case CXTypeKind.CXType_UChar:
-                    {
-                        name = (cursor is null) ? "Byte" : "byte";
-                        break;
-                    }
-
-                    case CXTypeKind.CXType_Char16:
-                    case CXTypeKind.CXType_UShort:
-                    {
-                        name = (cursor is null) ? "UInt16" : "ushort";
-                        break;
-                    }
-
-                    case CXTypeKind.CXType_UInt:
-                    {
-                        name = (cursor is null) ? "UInt32" : "uint";
-                        break;
-                    }
-
-                    case CXTypeKind.CXType_ULong:
-                    {
-                        if (_config.GenerateUnixTypes)
+                        if ((parmVarDecl.ParentFunctionOrMethod is FunctionDecl functionDecl) && ((functionDecl is CXXMethodDecl { IsVirtual: true }) || (functionDecl.Body is null)) && (targetTypeName == "bool"))
                         {
-                            name = _config.ExcludeNIntCodegen ? "UIntPtr" : "nuint";
-                        }
-                        else
-                        {
-                            goto case CXTypeKind.CXType_UInt;
-                        }
-                        break;
-                    }
-
-                    case CXTypeKind.CXType_ULongLong:
-                    {
-                        name = (cursor is null) ? "UInt64" : "ulong";
-                        break;
-                    }
-
-                    case CXTypeKind.CXType_Char_S:
-                    case CXTypeKind.CXType_SChar:
-                    {
-                        name = (cursor is null) ? "SByte" : "sbyte";
-                        break;
-                    }
-
-                    case CXTypeKind.CXType_WChar:
-                    {
-                        if (_config.GenerateUnixTypes)
-                        {
-                            goto case CXTypeKind.CXType_Int;
-                        }
-                        else
-                        {
-                            goto case CXTypeKind.CXType_UShort;
+                            // bool is not blittable, so we shouldn't use it for P/Invoke signatures
+                            targetTypeName = "byte";
+                            nativeTypeName = string.IsNullOrWhiteSpace(nativeTypeName) ? "bool" : nativeTypeName;
                         }
                     }
-
-                    case CXTypeKind.CXType_Short:
+                    else
                     {
-                        name = (cursor is null) ? "Int16" : "short";
-                        break;
-                    }
+                        var type = varDecl.Type;
+                        var cursorName = GetCursorName(varDecl);
 
-                    case CXTypeKind.CXType_Int:
-                    {
-                        name = (cursor is null) ? "Int32" : "int";
-                        break;
-                    }
-
-                    case CXTypeKind.CXType_Long:
-                    {
-                        if (_config.GenerateUnixTypes)
+                        if (cursorName.StartsWith("ClangSharpMacro_"))
                         {
-                            name = _config.ExcludeNIntCodegen ? "IntPtr" : "nint";
+                            cursorName = cursorName["ClangSharpMacro_".Length..];
+
+                            if (_config.WithTypes.TryGetValue(cursorName, out targetTypeName))
+                            {
+                                return targetTypeName;
+                            }
+
+                            type = varDecl.Init.Type;
                         }
-                        else
+
+                        targetTypeName = GetRemappedTypeName(varDecl, context: null, type, out nativeTypeName);
+                    }
+                }
+
+            }
+            else if ((cursor is Expr expr) && (expr is not MemberExpr))
+            {
+                targetTypeName = GetRemappedTypeName(expr, context: null, expr.Type, out nativeTypeName);
+            }
+
+            return targetTypeName;
+        }
+
+        private string GetTypeName(Cursor cursor, Cursor context, Type type, bool ignoreTransparentStructsWhereRequired, out string nativeTypeName)
+            => GetTypeName(cursor, context, type, type, ignoreTransparentStructsWhereRequired, out nativeTypeName);
+
+        private string GetTypeName(Cursor cursor, Cursor context, Type rootType, Type type, bool ignoreTransparentStructsWhereRequired, out string nativeTypeName)
+        {
+            if (!_typeNames.TryGetValue((cursor, context, type), out var result))
+            {
+                result.typeName = type.AsString.Replace('\\', '/');
+
+                if (result.typeName.Contains("unnamed struct at"))
+                {
+                    result.typeName = result.typeName.Replace("unnamed struct at", "anonymous struct at");
+                }
+
+                if (result.typeName.Contains("unnamed union at"))
+                {
+                    result.typeName = result.typeName.Replace("unnamed union at", "anonymous union at");
+                }
+
+                result.nativeTypeName = result.typeName;
+
+                if (type is ArrayType arrayType)
+                {
+                    result.typeName = GetTypeName(cursor, context, rootType, arrayType.ElementType, ignoreTransparentStructsWhereRequired, out _);
+
+                    if (cursor is FunctionDecl or ParmVarDecl)
+                    {
+                        result.typeName = GetRemappedName(result.typeName, cursor, tryRemapOperatorName: false, out _, skipUsing: true);
+                        result.typeName += '*';
+                    }
+                }
+                else if (type is AttributedType attributedType)
+                {
+                    result.typeName = GetTypeName(cursor, context, rootType, attributedType.ModifiedType, ignoreTransparentStructsWhereRequired, out _);
+                }
+                else if (type is BuiltinType)
+                {
+                    switch (type.Kind)
+                    {
+                        case CXTypeKind.CXType_Void:
                         {
-                            goto case CXTypeKind.CXType_Int;
-                        }
-                        break;
-                    }
-
-                    case CXTypeKind.CXType_LongLong:
-                    {
-                        name = (cursor is null) ? "Int64" : "long";
-                        break;
-                    }
-
-                    case CXTypeKind.CXType_Float:
-                    {
-                        name = (cursor is null) ? "Single" : "float";
-                        break;
-                    }
-
-                    case CXTypeKind.CXType_Double:
-                    {
-                        name = (cursor is null) ? "Double" : "double";
-                        break;
-                    }
-
-                    case CXTypeKind.CXType_NullPtr:
-                    {
-                        name = "null";
-                        break;
-                    }
-
-                    default:
-                    {
-                        AddDiagnostic(DiagnosticLevel.Warning, $"Unsupported builtin type: '{type.KindSpelling}'. Falling back '{name}'.", cursor);
-                        break;
-                    }
-                }
-            }
-            else if (type is DeducedType deducedType)
-            {
-                name = GetTypeName(cursor, context, deducedType.CanonicalType, out _);
-            }
-            else if (type is DependentNameType dependentNameType)
-            {
-                if (dependentNameType.IsSugared)
-                {
-                    name = GetTypeName(cursor, context, dependentNameType.Desugar, out _);
-                }
-                else
-                {
-                    // The default name should be correct
-                }
-            }
-            else if (type is ElaboratedType elaboratedType)
-            {
-                name = GetTypeName(cursor, context, elaboratedType.NamedType, out _);
-            }
-            else if (type is FunctionType functionType)
-            {
-                name = GetTypeNameForPointeeType(cursor, context, functionType, out _);
-            }
-            else if (type is InjectedClassNameType injectedClassNameType)
-            {
-                name = GetTypeName(cursor, context, injectedClassNameType.InjectedTST, out _);
-            }
-            else if (type is PackExpansionType packExpansionType)
-            {
-                name = GetTypeName(cursor, context, packExpansionType.Pattern, out _);
-            }
-            else if (type is PointerType pointerType)
-            {
-                name = GetTypeNameForPointeeType(cursor, context, pointerType.PointeeType, out _);
-            }
-            else if (type is ReferenceType referenceType)
-            {
-                name = GetTypeNameForPointeeType(cursor, context, referenceType.PointeeType, out _);
-            }
-            else if (type is SubstTemplateTypeParmType substTemplateTypeParmType)
-            {
-                name = GetTypeName(cursor, context, substTemplateTypeParmType.ReplacementType, out _);
-            }
-            else if (type is TagType tagType)
-            {
-                if (tagType.Decl.Handle.IsAnonymous)
-                {
-                    name = GetAnonymousName(tagType.Decl, tagType.KindSpelling);
-                }
-                else if (tagType.Handle.IsConstQualified)
-                {
-                    name = GetTypeName(cursor, context, tagType.Decl.TypeForDecl, out _);
-                }
-                else
-                {
-                    // The default name should be correct
-                }
-
-                if (name.Contains("::"))
-                {
-                    name = name.Split(new string[] { "::" }, StringSplitOptions.RemoveEmptyEntries).Last();
-                    name = GetRemappedName(name, cursor, tryRemapOperatorName: false, out _);
-                }
-            }
-            else if (type is TemplateSpecializationType templateSpecializationType)
-            {
-                var nameBuilder = new StringBuilder();
-
-                var templateTypeDecl = templateSpecializationType.CanonicalType is RecordType recordType
-                                     ? recordType.Decl
-                                     : (NamedDecl)templateSpecializationType.TemplateName.AsTemplateDecl;
-
-                _ = nameBuilder.Append(GetRemappedName(templateTypeDecl.Name, templateTypeDecl, tryRemapOperatorName: false, out _));
-                _ = nameBuilder.Append('<');
-
-                var shouldWritePrecedingComma = false;
-
-                foreach (var arg in templateSpecializationType.Args)
-                {
-                    if (shouldWritePrecedingComma)
-                    {
-                        _ = nameBuilder.Append(',');
-                        _ = nameBuilder.Append(' ');
-                    }
-
-                    var typeName = "";
-
-                    switch (arg.Kind)
-                    {
-                        case CXTemplateArgumentKind.CXTemplateArgumentKind_Type:
-                        {
-                            typeName = GetRemappedTypeName(cursor, context: null, arg.AsType, out var nativeAsTypeName);
+                            result.typeName = (cursor is null) ? "Void" : "void";
                             break;
                         }
 
-                        case CXTemplateArgumentKind.CXTemplateArgumentKind_Expression:
+                        case CXTypeKind.CXType_Bool:
                         {
-                            var oldOutputBuilder = _outputBuilder;
-                            _outputBuilder = new CSharpOutputBuilder("ClangSharp_TemplateSpecializationType_AsExpr");
+                            result.typeName = (cursor is null) ? "Boolean" : "bool";
+                            break;
+                        }
 
-                            Visit(arg.AsExpr);
-                            typeName = _outputBuilder.ToString();
+                        case CXTypeKind.CXType_Char_U:
+                        case CXTypeKind.CXType_UChar:
+                        {
+                            result.typeName = (cursor is null) ? "Byte" : "byte";
+                            break;
+                        }
 
-                            _outputBuilder = oldOutputBuilder;
+                        case CXTypeKind.CXType_Char16:
+                        case CXTypeKind.CXType_UShort:
+                        {
+                            result.typeName = (cursor is null) ? "UInt16" : "ushort";
+                            break;
+                        }
+
+                        case CXTypeKind.CXType_UInt:
+                        {
+                            result.typeName = (cursor is null) ? "UInt32" : "uint";
+                            break;
+                        }
+
+                        case CXTypeKind.CXType_ULong:
+                        {
+                            if (_config.GenerateUnixTypes)
+                            {
+                                result.typeName = _config.ExcludeNIntCodegen ? "UIntPtr" : "nuint";
+                            }
+                            else
+                            {
+                                goto case CXTypeKind.CXType_UInt;
+                            }
+                            break;
+                        }
+
+                        case CXTypeKind.CXType_ULongLong:
+                        {
+                            result.typeName = (cursor is null) ? "UInt64" : "ulong";
+                            break;
+                        }
+
+                        case CXTypeKind.CXType_Char_S:
+                        case CXTypeKind.CXType_SChar:
+                        {
+                            result.typeName = (cursor is null) ? "SByte" : "sbyte";
+                            break;
+                        }
+
+                        case CXTypeKind.CXType_WChar:
+                        {
+                            if (_config.GenerateUnixTypes)
+                            {
+                                goto case CXTypeKind.CXType_UInt;
+                            }
+                            else
+                            {
+                                goto case CXTypeKind.CXType_UShort;
+                            }
+                        }
+
+                        case CXTypeKind.CXType_Short:
+                        {
+                            result.typeName = (cursor is null) ? "Int16" : "short";
+                            break;
+                        }
+
+                        case CXTypeKind.CXType_Int:
+                        {
+                            result.typeName = (cursor is null) ? "Int32" : "int";
+                            break;
+                        }
+
+                        case CXTypeKind.CXType_Long:
+                        {
+                            if (_config.GenerateUnixTypes)
+                            {
+                                result.typeName = _config.ExcludeNIntCodegen ? "IntPtr" : "nint";
+                            }
+                            else
+                            {
+                                goto case CXTypeKind.CXType_Int;
+                            }
+                            break;
+                        }
+
+                        case CXTypeKind.CXType_LongLong:
+                        {
+                            result.typeName = (cursor is null) ? "Int64" : "long";
+                            break;
+                        }
+
+                        case CXTypeKind.CXType_Float:
+                        {
+                            result.typeName = (cursor is null) ? "Single" : "float";
+                            break;
+                        }
+
+                        case CXTypeKind.CXType_Double:
+                        {
+                            result.typeName = (cursor is null) ? "Double" : "double";
+                            break;
+                        }
+
+                        case CXTypeKind.CXType_NullPtr:
+                        {
+                            result.typeName = "null";
                             break;
                         }
 
                         default:
                         {
-                            typeName = name;
-                            AddDiagnostic(DiagnosticLevel.Warning, $"Unsupported template argument kind: '{arg.Kind}'. Falling back '{name}'.", cursor);
+                            AddDiagnostic(DiagnosticLevel.Warning, $"Unsupported builtin type: '{type.KindSpelling}'. Falling back '{result.typeName}'.", cursor);
                             break;
                         }
                     }
-
-                    if (typeName == "bool")
-                    {
-                        // bool is not blittable, so we shouldn't use it for P/Invoke signatures
-                        typeName = "byte";
-                    }
-
-                    if (typeName.EndsWith("*") || typeName.Contains("delegate*"))
-                    {
-                        // Pointers are not yet supported as generic arguments; remap to IntPtr
-                        typeName = "IntPtr";
-                        _outputBuilder.EmitSystemSupport();
-                    }
-
-                    _ = nameBuilder.Append(typeName);
-
-                    shouldWritePrecedingComma = true;
                 }
-
-                _ = nameBuilder.Append('>');
-
-                name = nameBuilder.ToString();
-            }
-            else if (type is TemplateTypeParmType templateTypeParmType)
-            {
-                if (templateTypeParmType.IsSugared)
+                else if (type is DeducedType deducedType)
                 {
-                    name = GetTypeName(cursor, context, templateTypeParmType.Desugar, out _);
+                    result.typeName = GetTypeName(cursor, context, rootType, deducedType.CanonicalType, ignoreTransparentStructsWhereRequired, out _);
+                }
+                else if (type is DependentNameType dependentNameType)
+                {
+                    if (dependentNameType.IsSugared)
+                    {
+                        result.typeName = GetTypeName(cursor, context, rootType, dependentNameType.Desugar, ignoreTransparentStructsWhereRequired, out _);
+                    }
+                    else
+                    {
+                        // The default name should be correct
+                    }
+                }
+                else if (type is ElaboratedType elaboratedType)
+                {
+                    result.typeName = GetTypeName(cursor, context, rootType, elaboratedType.NamedType, ignoreTransparentStructsWhereRequired, out _);
+                }
+                else if (type is FunctionType functionType)
+                {
+                    result.typeName = GetTypeNameForPointeeType(cursor, context, rootType, functionType, ignoreTransparentStructsWhereRequired, out _);
+                }
+                else if (type is InjectedClassNameType injectedClassNameType)
+                {
+                    result.typeName = GetTypeName(cursor, context, rootType, injectedClassNameType.InjectedTST, ignoreTransparentStructsWhereRequired, out _);
+                }
+                else if (type is PackExpansionType packExpansionType)
+                {
+                    result.typeName = GetTypeName(cursor, context, rootType, packExpansionType.Pattern, ignoreTransparentStructsWhereRequired, out _);
+                }
+                else if (type is PointerType pointerType)
+                {
+                    result.typeName = GetTypeNameForPointeeType(cursor, context, rootType, pointerType.PointeeType, ignoreTransparentStructsWhereRequired, out _);
+                }
+                else if (type is ReferenceType referenceType)
+                {
+                    result.typeName = GetTypeNameForPointeeType(cursor, context, rootType, referenceType.PointeeType, ignoreTransparentStructsWhereRequired, out _);
+                }
+                else if (type is SubstTemplateTypeParmType substTemplateTypeParmType)
+                {
+                    result.typeName = GetTypeName(cursor, context, rootType, substTemplateTypeParmType.ReplacementType, ignoreTransparentStructsWhereRequired, out _);
+                }
+                else if (type is TagType tagType)
+                {
+                    if (tagType.Decl.Handle.IsAnonymous)
+                    {
+                        result.typeName = GetAnonymousName(tagType.Decl, tagType.KindSpelling);
+                    }
+                    else if (tagType.Handle.IsConstQualified)
+                    {
+                        result.typeName = GetTypeName(cursor, context, rootType, tagType.Decl.TypeForDecl, ignoreTransparentStructsWhereRequired, out _);
+                    }
+                    else
+                    {
+                        // The default name should be correct for C++, but C may have a prefix we need to strip
+
+                        if (result.typeName.StartsWith("enum "))
+                        {
+                            result.typeName = result.typeName[5..];
+                        }
+                        else if (result.typeName.StartsWith("struct "))
+                        {
+                            result.typeName = result.typeName[7..];
+                        }
+                    }
+
+                    if (result.typeName.Contains("::"))
+                    {
+                        result.typeName = result.typeName.Split(new string[] { "::" }, StringSplitOptions.RemoveEmptyEntries).Last();
+                        result.typeName = GetRemappedName(result.typeName, cursor, tryRemapOperatorName: false, out _, skipUsing: true);
+                    }
+                }
+                else if (type is TemplateSpecializationType templateSpecializationType)
+                {
+                    var nameBuilder = new StringBuilder();
+
+                    var templateTypeDecl = templateSpecializationType.CanonicalType is RecordType recordType
+                                         ? recordType.Decl
+                                         : (NamedDecl)templateSpecializationType.TemplateName.AsTemplateDecl;
+
+                    _ = nameBuilder.Append(GetRemappedName(templateTypeDecl.Name, templateTypeDecl, tryRemapOperatorName: false, out _, skipUsing: true));
+                    _ = nameBuilder.Append('<');
+
+                    var shouldWritePrecedingComma = false;
+
+                    foreach (var arg in templateSpecializationType.Args)
+                    {
+                        if (shouldWritePrecedingComma)
+                        {
+                            _ = nameBuilder.Append(',');
+                            _ = nameBuilder.Append(' ');
+                        }
+
+                        var typeName = "";
+
+                        switch (arg.Kind)
+                        {
+                            case CXTemplateArgumentKind.CXTemplateArgumentKind_Type:
+                            {
+                                typeName = GetRemappedTypeName(cursor, context: null, arg.AsType, out var nativeAsTypeName, skipUsing: true);
+                                break;
+                            }
+
+                            case CXTemplateArgumentKind.CXTemplateArgumentKind_Expression:
+                            {
+                                var oldOutputBuilder = _outputBuilder;
+                                _outputBuilder = new CSharpOutputBuilder("ClangSharp_TemplateSpecializationType_AsExpr", _config);
+
+                                Visit(arg.AsExpr);
+                                typeName = _outputBuilder.ToString();
+
+                                _outputBuilder = oldOutputBuilder;
+                                break;
+                            }
+
+                            default:
+                            {
+                                typeName = result.typeName;
+                                AddDiagnostic(DiagnosticLevel.Warning, $"Unsupported template argument kind: '{arg.Kind}'. Falling back '{result.typeName}'.", cursor);
+                                break;
+                            }
+                        }
+
+                        if (typeName == "bool")
+                        {
+                            // bool is not blittable, so we shouldn't use it for P/Invoke signatures
+                            typeName = "byte";
+                        }
+
+                        if (typeName.EndsWith("*") || typeName.Contains("delegate*"))
+                        {
+                            // Pointers are not yet supported as generic arguments; remap to IntPtr
+                            typeName = "IntPtr";
+                            _outputBuilder.EmitSystemSupport();
+                        }
+
+                        _ = nameBuilder.Append(typeName);
+
+                        shouldWritePrecedingComma = true;
+                    }
+
+                    _ = nameBuilder.Append('>');
+
+                    result.typeName = nameBuilder.ToString();
+                }
+                else if (type is TemplateTypeParmType templateTypeParmType)
+                {
+                    if (templateTypeParmType.IsSugared)
+                    {
+                        result.typeName = GetTypeName(cursor, context, rootType, templateTypeParmType.Desugar, ignoreTransparentStructsWhereRequired, out _);
+                    }
+                    else
+                    {
+                        // The default name should be correct
+                    }
+                }
+                else if (type is TypedefType typedefType)
+                {
+                    // We check remapped names here so that types that have variable sizes
+                    // can be treated correctly. Otherwise, they will resolve to a particular
+                    // platform size, based on whatever parameters were passed into clang.
+
+                    var remappedName = GetRemappedName(result.typeName, cursor, tryRemapOperatorName: false, out var wasRemapped, skipUsing: true);
+                    result.typeName = wasRemapped ? remappedName : GetTypeName(cursor, context, rootType, typedefType.Decl.UnderlyingType, ignoreTransparentStructsWhereRequired, out _);
                 }
                 else
                 {
-                    // The default name should be correct
+                    AddDiagnostic(DiagnosticLevel.Warning, $"Unsupported type: '{type.TypeClass}'. Falling back '{result.typeName}'.", cursor);
                 }
-            }
-            else if (type is TypedefType typedefType)
-            {
-                // We check remapped names here so that types that have variable sizes
-                // can be treated correctly. Otherwise, they will resolve to a particular
-                // platform size, based on whatever parameters were passed into clang.
 
-                var remappedName = GetRemappedName(name, cursor, tryRemapOperatorName: false, out var wasRemapped);
-                name = wasRemapped ? remappedName : GetTypeName(cursor, context, typedefType.Decl.UnderlyingType, out _);
-            }
-            else
-            {
-                AddDiagnostic(DiagnosticLevel.Warning, $"Unsupported type: '{type.TypeClass}'. Falling back '{name}'.", cursor);
+                Debug.Assert(!string.IsNullOrWhiteSpace(result.typeName));
+                Debug.Assert(!string.IsNullOrWhiteSpace(result.nativeTypeName));
+
+                if (IsNativeTypeNameEquivalent(result.nativeTypeName, result.typeName))
+                {
+                    result.nativeTypeName = string.Empty;
+                }
+
+                _typeNames[(cursor, context, type)] = result;
             }
 
-            Debug.Assert(!string.IsNullOrWhiteSpace(name));
-            Debug.Assert(!string.IsNullOrWhiteSpace(nativeTypeName));
-
-            if (nativeTypeName.Equals(name))
-            {
-                nativeTypeName = string.Empty;
-            }
-            return name;
+            nativeTypeName = result.nativeTypeName;
+            return result.typeName;
         }
 
-        private string GetTypeNameForPointeeType(Cursor cursor, Cursor context, Type pointeeType, out string nativePointeeTypeName)
+        private string GetTypeNameForPointeeType(Cursor cursor, Cursor context, Type rootType, Type pointeeType, bool ignoreTransparentStructsWhereRequired, out string nativePointeeTypeName)
         {
             var name = pointeeType.AsString;
             nativePointeeTypeName = name;
 
             if (pointeeType is AttributedType attributedType)
             {
-                name = GetTypeNameForPointeeType(cursor, context, attributedType.ModifiedType, out var nativeModifiedTypeName);
+                name = GetTypeNameForPointeeType(cursor, context, rootType, attributedType.ModifiedType, ignoreTransparentStructsWhereRequired, out var nativeModifiedTypeName);
+            }
+            else if (pointeeType is ElaboratedType elaboratedType)
+            {
+                name = GetTypeNameForPointeeType(cursor, context, rootType, elaboratedType.NamedType, ignoreTransparentStructsWhereRequired, out var nativeNamedTypeName);
             }
             else if (pointeeType is FunctionType functionType)
             {
                 if (!_config.ExcludeFnptrCodegen && (functionType is FunctionProtoType functionProtoType))
                 {
-                    var remappedName = GetRemappedName(name, cursor, tryRemapOperatorName: false, out var wasRemapped);
-                    var callConv = GetCallingConvention(cursor, functionType.CallConv, remappedName);
+                    _config.ExcludeFnptrCodegen = true;
+                    var callConv = GetCallingConvention(cursor, context, rootType);
+                    _config.ExcludeFnptrCodegen = false;
 
                     var needsReturnFixup = false;
-                    var returnTypeName = GetRemappedTypeName(cursor, context: null, functionType.ReturnType, out _);
+                    var returnTypeName = GetRemappedTypeName(cursor, context: null, functionType.ReturnType, out _, skipUsing: true);
 
                     if (returnTypeName == "bool")
                     {
@@ -1728,12 +3182,22 @@ namespace ClangSharp
                     if (!isMacroDefinitionRecord)
                     {
                         _ = nameBuilder.Append(" unmanaged");
+                        var hasSuppressGCTransition = HasSuppressGCTransition(cursor);
 
                         if (callConv != CallingConvention.Winapi)
                         {
                             _ = nameBuilder.Append('[');
                             _ = nameBuilder.Append(callConv.AsString(true));
+
+                            if (hasSuppressGCTransition)
+                            {
+                                _ = nameBuilder.Append(", SuppressGCTransition");
+                            }
                             _ = nameBuilder.Append(']');
+                        }
+                        else if (hasSuppressGCTransition)
+                        {
+                            _ = nameBuilder.Append("[SuppressGCTransition]");
                         }
                     }
 
@@ -1768,13 +3232,13 @@ namespace ClangSharp
                         {
                             cursor = functionDecl;
                             paramTypes = functionDecl.Parameters.Select((param) => param.Type);
-                            returnTypeName = GetRemappedTypeName(cursor, context: null, functionDecl.ReturnType, out _);
+                            returnTypeName = GetRemappedTypeName(cursor, context: null, functionDecl.ReturnType, out _, skipUsing: true);
                         }
                     }
 
                     foreach (var paramType in paramTypes)
                     {
-                        var typeName = GetRemappedTypeName(cursor, context: null, paramType, out _);
+                        var typeName = GetRemappedTypeName(cursor, context: null, paramType, out _, skipUsing: true);
 
                         if (typeName == "bool")
                         {
@@ -1787,11 +3251,18 @@ namespace ClangSharp
                         _ = nameBuilder.Append(' ');
                     }
 
-                    _ = nameBuilder.Append(returnTypeName);
-
-                    if (needsReturnFixup)
+                    if (!needsReturnFixup && ignoreTransparentStructsWhereRequired && _config.WithTransparentStructs.TryGetValue(returnTypeName, out var transparentStruct))
                     {
-                        _ = nameBuilder.Append('*');
+                        _ = nameBuilder.Append(transparentStruct.Name);
+                    }
+                    else
+                    {
+                        _ = nameBuilder.Append(returnTypeName);
+
+                        if (needsReturnFixup)
+                        {
+                            _ = nameBuilder.Append('*');
+                        }
                     }
 
                     _ = nameBuilder.Append('>');
@@ -1802,10 +3273,28 @@ namespace ClangSharp
                     name = "IntPtr";
                 }
             }
+            else if (pointeeType is TypedefType typedefType)
+            {
+                // We check remapped names here so that types that have variable sizes
+                // can be treated correctly. Otherwise, they will resolve to a particular
+                // platform size, based on whatever parameters were passed into clang.
+
+                var remappedName = GetRemappedName(name, cursor, tryRemapOperatorName: false, out var wasRemapped, skipUsing: true);
+
+                if (wasRemapped)
+                {
+                    name = remappedName;
+                    name += '*';
+                }
+                else
+                {
+                    name = GetTypeNameForPointeeType(cursor, context, rootType, typedefType.Decl.UnderlyingType, ignoreTransparentStructsWhereRequired, out var nativeUnderlyingTypeName);
+                }
+            }
             else
             {
                 // Otherwise fields that point at anonymous structs get the wrong name
-                name = GetRemappedTypeName(cursor, context, pointeeType, out nativePointeeTypeName);
+                name = GetRemappedTypeName(cursor, context, pointeeType, out nativePointeeTypeName, skipUsing: true);
                 name += '*';
             }
 
@@ -1814,6 +3303,12 @@ namespace ClangSharp
 
         private void GetTypeSize(Cursor cursor, Type type, ref long alignment32, ref long alignment64, out long size32, out long size64)
         {
+            var has8BytePrimitiveField = false;
+            GetTypeSize(cursor, type, ref alignment32, ref alignment64, ref has8BytePrimitiveField, out size32, out size64);
+        }
+
+        private void GetTypeSize(Cursor cursor, Type type, ref long alignment32, ref long alignment64, ref bool has8BytePrimitiveField, out long size32, out long size64)
+        {
             size32 = 0;
             size64 = 0;
 
@@ -1821,7 +3316,7 @@ namespace ClangSharp
             {
                 if (type is ConstantArrayType constantArrayType)
                 {
-                    GetTypeSize(cursor, arrayType.ElementType, ref alignment32, ref alignment64, out var elementSize32, out var elementSize64);
+                    GetTypeSize(cursor, arrayType.ElementType, ref alignment32, ref alignment64, ref has8BytePrimitiveField, out var elementSize32, out var elementSize64);
 
                     size32 = elementSize32 * Math.Max(constantArrayType.Size, 1);
                     size64 = elementSize64 * Math.Max(constantArrayType.Size, 1);
@@ -1838,7 +3333,7 @@ namespace ClangSharp
                 }
                 else if (type is IncompleteArrayType)
                 {
-                    GetTypeSize(cursor, arrayType.ElementType, ref alignment32, ref alignment64, out var elementSize32, out var elementSize64);
+                    GetTypeSize(cursor, arrayType.ElementType, ref alignment32, ref alignment64, ref has8BytePrimitiveField, out var elementSize32, out var elementSize64);
 
                     size32 = elementSize32;
                     size64 = elementSize64;
@@ -1871,7 +3366,7 @@ namespace ClangSharp
             }
             else if (type is AttributedType attributedType)
             {
-                GetTypeSize(cursor, attributedType.ModifiedType, ref alignment32, ref alignment64, out size32, out size64);
+                GetTypeSize(cursor, attributedType.ModifiedType, ref alignment32, ref alignment64, ref has8BytePrimitiveField, out size32, out size64);
             }
             else if (type is BuiltinType)
             {
@@ -1913,6 +3408,11 @@ namespace ClangSharp
                             size32 = 4;
                             size64 = 8;
 
+                            if (alignment32 == -1)
+                            {
+                                alignment32 = 4;
+                            }
+
                             if (alignment64 == -1)
                             {
                                 alignment64 = 8;
@@ -1932,10 +3432,17 @@ namespace ClangSharp
                         size32 = 8;
                         size64 = 8;
 
+                        if (alignment32 == -1)
+                        {
+                            alignment32 = 8;
+                        }
+
                         if (alignment64 == -1)
                         {
                             alignment64 = 8;
                         }
+
+                        has8BytePrimitiveField = true;
                         break;
                     }
 
@@ -1960,11 +3467,11 @@ namespace ClangSharp
             }
             else if (type is ElaboratedType elaboratedType)
             {
-                GetTypeSize(cursor, elaboratedType.NamedType, ref alignment32, ref alignment64, out size32, out size64);
+                GetTypeSize(cursor, elaboratedType.NamedType, ref alignment32, ref alignment64, ref has8BytePrimitiveField, out size32, out size64);
             }
             else if (type is EnumType enumType)
             {
-                GetTypeSize(cursor, enumType.Decl.IntegerType, ref alignment32, ref alignment64, out size32, out size64);
+                GetTypeSize(cursor, enumType.Decl.IntegerType, ref alignment32, ref alignment64, ref has8BytePrimitiveField, out size32, out size64);
             }
             else if (type is FunctionType or PointerType or ReferenceType)
             {
@@ -1988,11 +3495,15 @@ namespace ClangSharp
             }
             else if (type is RecordType recordType)
             {
-                var recordTypeAlignOf = recordType.Handle.AlignOf;
+                var recordTypeAlignOf = Math.Min(recordType.Handle.AlignOf, 8);
 
                 if (alignment32 == -1)
                 {
                     alignment32 = recordTypeAlignOf;
+                }
+
+                if (alignment64 == -1)
+                {
                     alignment64 = recordTypeAlignOf;
                 }
 
@@ -2002,23 +3513,30 @@ namespace ClangSharp
                 long maxFieldSize32 = 0;
                 long maxFieldSize64 = 0;
 
+                var anyFieldIs8BytePrimitive = false;
+
                 if (recordType.Decl is CXXRecordDecl cxxRecordDecl)
                 {
-                    if (HasVtbl(cxxRecordDecl))
+                    if (HasVtbl(cxxRecordDecl, out _))
                     {
                         size32 += 4;
                         size64 += 8;
 
-                        if (alignment64 == 4)
+                        if (alignment32 < 4)
                         {
-                            alignment64 = 8;
+                            alignment32 = Math.Max(Math.Min(alignment32, 4), 1);
                         }
 
-                        maxFieldSize32 = 4;
-                        maxFieldSize64 = 8;
+                        if (alignment64 < 4)
+                        {
+                            alignment64 = Math.Max(Math.Min(alignment32, 8), 1);
+                        }
 
-                        maxFieldAlignment32 = alignment32;
-                        maxFieldAlignment64 = alignment64;
+                        maxFieldSize32 = Math.Max(maxFieldSize32, 4);
+                        maxFieldSize64 = Math.Max(maxFieldSize64, 8);
+
+                        maxFieldAlignment32 = Math.Max(maxFieldSize32, 4);
+                        maxFieldAlignment64 = Math.Max(maxFieldSize64, 8);
                     }
                     else
                     {
@@ -2027,7 +3545,7 @@ namespace ClangSharp
                             long fieldAlignment32 = -1;
                             long fieldAlignment64 = -1;
 
-                            GetTypeSize(baseCXXRecordDecl, baseCXXRecordDecl.Type, ref fieldAlignment32, ref fieldAlignment64, out var fieldSize32, out var fieldSize64);
+                            GetTypeSize(baseCXXRecordDecl, baseCXXRecordDecl.Type, ref fieldAlignment32, ref fieldAlignment64, ref anyFieldIs8BytePrimitive, out var fieldSize32, out var fieldSize64);
 
                             if ((fieldAlignment32 == -1) || (alignment32 < 4))
                             {
@@ -2061,78 +3579,102 @@ namespace ClangSharp
                     }
                 }
 
-                var bitfieldPreviousSize = 0L;
-                var bitfieldRemainingBits = 0L;
+                var bitfieldPreviousSize32 = 0L;
+                var bitfieldPreviousSize64 = 0L;
+                var bitfieldRemainingBits32 = 0L;
+                var bitfieldRemainingBits64 = 0L;
 
-                foreach (var declaration in recordType.Decl.Decls)
+                foreach (var fieldDecl in recordType.Decl.Fields)
                 {
-                    long fieldSize32;
-                    long fieldSize64;
-
                     long fieldAlignment32 = -1;
                     long fieldAlignment64 = -1;
 
-                    if (declaration is FieldDecl fieldDecl)
-                    {
-                        GetTypeSize(fieldDecl, fieldDecl.Type, ref fieldAlignment32, ref fieldAlignment64, out fieldSize32, out fieldSize64);
+                    GetTypeSize(fieldDecl, fieldDecl.Type, ref fieldAlignment32, ref fieldAlignment64, ref anyFieldIs8BytePrimitive, out var fieldSize32, out var fieldSize64);
 
-                        if (fieldDecl.IsBitField)
+                    var ignoreFieldSize32 = false;
+                    var ignoreFieldSize64 = false;
+
+                    if (fieldDecl.IsBitField)
+                    {
+                        if (fieldSize32 != bitfieldPreviousSize32)
                         {
-                            if ((fieldSize32 != bitfieldPreviousSize) || (fieldDecl.BitWidthValue > bitfieldRemainingBits))
+                            bitfieldRemainingBits32 = fieldSize32 * 8;
+                            bitfieldPreviousSize32 = fieldSize32;
+                            bitfieldRemainingBits32 -= fieldDecl.BitWidthValue;
+                        }
+                        else if (fieldDecl.BitWidthValue > bitfieldRemainingBits32)
+                        {
+                            if (bitfieldRemainingBits32 != bitfieldRemainingBits64)
                             {
-                                bitfieldRemainingBits = fieldSize32 * 8;
-                                bitfieldPreviousSize = fieldSize32;
-                                bitfieldRemainingBits -= fieldDecl.BitWidthValue;
+                                ignoreFieldSize32 = true;
                             }
-                            else
-                            {
-                                bitfieldPreviousSize = fieldSize32;
-                                bitfieldRemainingBits -= fieldDecl.BitWidthValue;
-                                continue;
-                            }
+
+                            bitfieldRemainingBits32 = fieldSize32 * 8;
+                            bitfieldPreviousSize32 = fieldSize32;
+                            bitfieldRemainingBits32 -= fieldDecl.BitWidthValue;
+                        }
+                        else
+                        {
+                            bitfieldPreviousSize32 = fieldSize32;
+                            bitfieldRemainingBits32 -= fieldDecl.BitWidthValue;
+                            ignoreFieldSize32 = true;
+                        }
+
+                        if ((fieldSize64 != bitfieldPreviousSize64) || (fieldDecl.BitWidthValue > bitfieldRemainingBits64))
+                        {
+                            bitfieldRemainingBits64 = fieldSize64 * 8;
+                            bitfieldPreviousSize64 = fieldSize64;
+                            bitfieldRemainingBits64 -= fieldDecl.BitWidthValue;
+                        }
+                        else
+                        {
+                            bitfieldPreviousSize64 = fieldSize64;
+                            bitfieldRemainingBits64 -= fieldDecl.BitWidthValue;
+                            ignoreFieldSize64 = true;
                         }
                     }
-                    else
+
+                    if (!ignoreFieldSize32)
                     {
-                        continue;
+                        if ((fieldAlignment32 == -1) || (alignment32 < 4))
+                        {
+                            fieldAlignment32 = Math.Max(Math.Min(alignment32, fieldSize32), 1);
+                        }
+
+                        if ((size32 % fieldAlignment32) != 0)
+                        {
+                            size32 += fieldAlignment32 - (size32 % fieldAlignment32);
+                        }
+
+                        size32 += fieldSize32;
+                        maxFieldAlignment32 = Math.Max(maxFieldAlignment32, fieldAlignment32);
+                        maxFieldSize32 = Math.Max(maxFieldSize32, fieldSize32);
                     }
 
-                    if ((fieldAlignment32 == -1) || (alignment32 < 4))
+                    if (!ignoreFieldSize64)
                     {
-                        fieldAlignment32 = Math.Max(Math.Min(alignment32, fieldSize32), 1);
+                        if ((fieldAlignment64 == -1) || (alignment64 < 4))
+                        {
+                            fieldAlignment64 = Math.Max(Math.Min(alignment64, fieldSize64), 1);
+                        }
+
+                        if ((size64 % fieldAlignment64) != 0)
+                        {
+                            size64 += fieldAlignment64 - (size64 % fieldAlignment64);
+                        }
+
+                        size64 += fieldSize64;
+                        maxFieldAlignment64 = Math.Max(maxFieldAlignment64, fieldAlignment64);
+                        maxFieldSize64 = Math.Max(maxFieldSize64, fieldSize64);
                     }
-
-                    if ((fieldAlignment64 == -1) || (alignment64 < 4))
-                    {
-                        fieldAlignment64 = Math.Max(Math.Min(alignment64, fieldSize64), 1);
-                    }
-
-                    if ((size32 % fieldAlignment32) != 0)
-                    {
-                        size32 += fieldAlignment32 - (size32 % fieldAlignment32);
-                    }
-
-                    if ((size64 % fieldAlignment64) != 0)
-                    {
-                        size64 += fieldAlignment64 - (size64 % fieldAlignment64);
-                    }
-
-                    size32 += fieldSize32;
-                    size64 += fieldSize64;
-
-                    maxFieldAlignment32 = Math.Max(maxFieldAlignment32, fieldAlignment32);
-                    maxFieldAlignment64 = Math.Max(maxFieldAlignment64, fieldAlignment64);
-
-                    maxFieldSize32 = Math.Max(maxFieldSize32, fieldSize32);
-                    maxFieldSize64 = Math.Max(maxFieldSize64, fieldSize64);
                 }
 
-                if (alignment32 == 8)
+                if ((alignment32 == 8) && !anyFieldIs8BytePrimitive)
                 {
                     alignment32 = Math.Min(alignment32, maxFieldAlignment32);
                 }
 
-                if (alignment64 == 4)
+                if ((alignment64 == 4) && !anyFieldIs8BytePrimitive)
                 {
                     alignment64 = Math.Max(alignment64, maxFieldAlignment64);
                 }
@@ -2152,6 +3694,8 @@ namespace ClangSharp
                 {
                     size64 += alignment64 - (size64 % alignment64);
                 }
+
+                has8BytePrimitiveField |= anyFieldIs8BytePrimitive;
             }
             else if (type is TypedefType typedefType)
             {
@@ -2159,14 +3703,31 @@ namespace ClangSharp
                 // can be treated correctly. Otherwise, they will resolve to a particular
                 // platform size, based on whatever parameters were passed into clang.
 
-                var name = GetTypeName(cursor, context: null, type, out _);
+                var name = GetTypeName(cursor, context: null, type, ignoreTransparentStructsWhereRequired: false, out _);
 
                 if (!_config.RemappedNames.TryGetValue(name, out var remappedName))
                 {
                     remappedName = name;
                 }
 
-                if (remappedName.Equals("IntPtr") || remappedName.Equals("nint") || remappedName.Equals("nuint") || remappedName.Equals("UIntPtr") || remappedName.EndsWith("*"))
+                if ((remappedName == name) && _config.WithTransparentStructs.TryGetValue(remappedName, out var transparentStruct) && ((transparentStruct.Name == "long") || (transparentStruct.Name == "ulong")))
+                {
+                    size32 = 8;
+                    size64 = 8;
+
+                    if (alignment32 == -1)
+                    {
+                        alignment32 = 8;
+                    }
+
+                    if (alignment64 == -1)
+                    {
+                        alignment64 = 8;
+                    }
+
+                    has8BytePrimitiveField = true;
+                }
+                else if (remappedName.Equals("IntPtr") || remappedName.Equals("nint") || remappedName.Equals("nuint") || remappedName.Equals("UIntPtr") || remappedName.EndsWith("*"))
                 {
                     size32 = 4;
                     size64 = 8;
@@ -2183,28 +3744,28 @@ namespace ClangSharp
                 }
                 else
                 {
-                    GetTypeSize(cursor, typedefType.Decl.UnderlyingType, ref alignment32, ref alignment64, out size32, out size64);
+                    GetTypeSize(cursor, typedefType.Decl.UnderlyingType, ref alignment32, ref alignment64, ref has8BytePrimitiveField, out size32, out size64);
                 }
             }
             else if (type is SubstTemplateTypeParmType substTemplateTypeParmType)
             {
-                GetTypeSize(cursor, substTemplateTypeParmType.ReplacementType, ref alignment32, ref alignment64, out size32, out size64);
+                GetTypeSize(cursor, substTemplateTypeParmType.ReplacementType, ref alignment32, ref alignment64, ref has8BytePrimitiveField, out size32, out size64);
             }
             else if (type is TemplateSpecializationType templateSpecializationType)
             {
                 if (templateSpecializationType.IsTypeAlias)
                 {
-                    GetTypeSize(cursor, templateSpecializationType.AliasedType, ref alignment32, ref alignment64, out size32, out size64);
+                    GetTypeSize(cursor, templateSpecializationType.AliasedType, ref alignment32, ref alignment64, ref has8BytePrimitiveField, out size32, out size64);
                 }
                 else if (templateSpecializationType.IsSugared)
                 {
-                    GetTypeSize(cursor, templateSpecializationType.Desugar, ref alignment32, ref alignment64, out size32, out size64);
+                    GetTypeSize(cursor, templateSpecializationType.Desugar, ref alignment32, ref alignment64, ref has8BytePrimitiveField, out size32, out size64);
                 }
                 else if (templateSpecializationType.TemplateName.AsTemplateDecl is TemplateDecl templateDecl)
                 {
                     if (templateDecl.TemplatedDecl is TypeDecl typeDecl)
                     {
-                        GetTypeSize(cursor, typeDecl.TypeForDecl, ref alignment32, ref alignment64, out size32, out size64);
+                        GetTypeSize(cursor, typeDecl.TypeForDecl, ref alignment32, ref alignment64, ref has8BytePrimitiveField, out size32, out size64);
                     }
                     else
                     {
@@ -2227,27 +3788,94 @@ namespace ClangSharp
             }
         }
 
-        private bool HasVtbl(CXXRecordDecl cxxRecordDecl)
+        private bool HasSuppressGCTransition(Cursor cursor)
         {
-            var hasDirectVtbl = cxxRecordDecl.Methods.Any((method) => method.IsVirtual);
-            var indirectVtblCount = 0;
+            if (cursor is not NamedDecl namedDecl)
+            {
+                return false;
+            }
+            return HasRemapping(namedDecl, _config.WithSuppressGCTransitions);
+        }
+
+        private bool HasBaseField(CXXRecordDecl cxxRecordDecl)
+        {
+            var hasBaseField = false;
 
             foreach (var cxxBaseSpecifier in cxxRecordDecl.Bases)
             {
-                var baseCxxRecordDecl = GetRecordDeclForBaseSpecifier(cxxBaseSpecifier);
+                var baseCxxRecordDecl = GetRecordDecl(cxxBaseSpecifier);
 
-                if (HasVtbl(baseCxxRecordDecl))
+                if (HasField(baseCxxRecordDecl))
                 {
-                    indirectVtblCount++;
+                    hasBaseField = true;
+                    break;
                 }
             }
 
-            if (indirectVtblCount > 1)
+            return hasBaseField;
+        }
+
+        private bool HasField(RecordDecl recordDecl)
+        {
+            var hasField = recordDecl.Fields.Any() || recordDecl.Decls.Any((decl) => (decl is RecordDecl nestedRecordDecl) && nestedRecordDecl.IsAnonymousStructOrUnion && HasField(nestedRecordDecl));
+
+            if (!hasField && (recordDecl is CXXRecordDecl cxxRecordDecl))
             {
-                AddDiagnostic(DiagnosticLevel.Warning, "Unsupported cxx record declaration: 'multiple virtual bases'. Generated bindings may be incomplete.", cxxRecordDecl);
+                hasField = HasBaseField(cxxRecordDecl);
             }
 
-            return hasDirectVtbl || (indirectVtblCount != 0);
+            return hasField;
+        }
+
+        private bool HasUnsafeMethod(CXXRecordDecl cxxRecordDecl)
+        {
+            var hasUnsafeMethod = cxxRecordDecl.Methods.Any((method) => method.IsUserProvided && IsUnsafe(method) && !IsExcluded(method));
+
+            if (!hasUnsafeMethod)
+            {
+                foreach (var cxxBaseSpecifier in cxxRecordDecl.Bases)
+                {
+                    var baseCxxRecordDecl = GetRecordDecl(cxxBaseSpecifier);
+
+                    if (HasUnsafeMethod(baseCxxRecordDecl))
+                    {
+                        hasUnsafeMethod = true;
+                        break;
+                    }
+                }
+            }
+
+            return hasUnsafeMethod;
+        }
+
+        private bool HasVtbl(CXXRecordDecl cxxRecordDecl, out bool hasBaseVtbl)
+        {
+            var hasVtbl = cxxRecordDecl.Methods.Any((method) => method.IsVirtual && method.IsVirtual && (method.OverriddenMethods.Count == 0));
+            hasBaseVtbl = false;
+
+            if (!hasVtbl)
+            {
+                var indirectVtblCount = 0;
+
+                foreach (var cxxBaseSpecifier in cxxRecordDecl.Bases)
+                {
+                    var baseCxxRecordDecl = GetRecordDecl(cxxBaseSpecifier);
+
+                    if ((HasVtbl(baseCxxRecordDecl, out var baseHasBaseVtbl) || baseHasBaseVtbl) && !HasField(baseCxxRecordDecl))
+                    {
+                        indirectVtblCount++;
+                    }
+                }
+
+                if (indirectVtblCount > 1)
+                {
+                    AddDiagnostic(DiagnosticLevel.Warning, "Unsupported cxx record declaration: 'multiple virtual bases'. Generated bindings may be incomplete.", cxxRecordDecl);
+                }
+
+                hasBaseVtbl = indirectVtblCount != 0;
+            }
+
+            return hasVtbl;
         }
 
         private static bool IsEnumOperator(FunctionDecl functionDecl, string name)
@@ -2295,14 +3923,17 @@ namespace ClangSharp
 
         private bool IsExcluded(Cursor cursor, out bool isExcludedByConflictingDefinition)
         {
-            isExcludedByConflictingDefinition = false;
-
-            return !IsAlwaysIncluded(cursor)
-                && (IsExcludedByConfig(cursor) || IsExcludedByFile(cursor) || IsExcludedByName(cursor, out isExcludedByConflictingDefinition));
+            if (!_isExcluded.TryGetValue(cursor, out var isExcludedValue))
+            {
+                isExcludedValue |= (!IsAlwaysIncluded(cursor) && (IsExcludedByConfig(cursor) || IsExcludedByFile(cursor) || IsExcludedByName(cursor, ref isExcludedValue))) ? 0b01u : 0b00u;
+                _isExcluded.Add(cursor, isExcludedValue);
+            }
+            isExcludedByConflictingDefinition = (isExcludedValue & 0b10) != 0;
+            return (isExcludedValue & 0b01) != 0;
 
             bool IsAlwaysIncluded(Cursor cursor)
             {
-                return (cursor is TranslationUnitDecl) || (cursor is LinkageSpecDecl) || ((cursor is VarDecl varDecl) && varDecl.Name.StartsWith("ClangSharpMacro_"));
+                return (cursor is TranslationUnitDecl) || (cursor is LinkageSpecDecl) || (cursor is NamespaceDecl) || ((cursor is VarDecl varDecl) && varDecl.Name.StartsWith("ClangSharpMacro_"));
             }
 
             bool IsExcludedByConfig(Cursor cursor)
@@ -2335,7 +3966,7 @@ namespace ClangSharp
 
                 declLocation.GetExpansionLocation(out var expansionFile, out var expansionLine, out var expansionColumn, out _);
 
-                if ((expansionFile == file) && (expansionLine == line) && (expansionColumn == column) && (_config.TraversalNames.Length != 0))
+                if ((expansionFile == file) && (expansionLine == line) && (expansionColumn == column) && _config.TraversalNames.Any())
                 {
                     // clang_getLocation is a very expensive call, so exit early if the expansion file is the same
                     // However, if we are not explicitly specifying traversal names, its possible the expansion location
@@ -2349,12 +3980,12 @@ namespace ClangSharp
                 return !IsIncludedFileOrLocation(cursor, file, expansionLocation);
             }
 
-            bool IsExcludedByName(Cursor cursor, out bool isExcludedByConflictingDefinition)
+            bool IsExcludedByName(Cursor cursor, ref uint isExcludedValue)
             {
                 var isExcludedByConfigOption = false;
-                isExcludedByConflictingDefinition = false;
 
                 string qualifiedName;
+                string qualifiedNameWithoutParameters = "";
                 string name;
                 string kind;
 
@@ -2364,6 +3995,12 @@ namespace ClangSharp
                     // can remove no-definition declarations in favor of remapped anonymous declarations.
 
                     qualifiedName = GetCursorQualifiedName(namedDecl);
+
+                    if (namedDecl is FunctionDecl)
+                    {
+                        qualifiedNameWithoutParameters = GetCursorQualifiedName(namedDecl, truncateFunctionParameters: true);
+                    }
+
                     name = GetCursorName(namedDecl);
                     kind = $"{namedDecl.DeclKindName} declaration";
 
@@ -2392,6 +4029,17 @@ namespace ClangSharp
                 {
                     return false;
                 }
+
+                if (qualifiedName.Contains("ClangSharpMacro_"))
+                {
+                    qualifiedName = qualifiedName.Replace("ClangSharpMacro_", "");
+                }
+
+                if (name.Contains("ClangSharpMacro_"))
+                {
+                    name = name.Replace("ClangSharpMacro_", "");
+                }
+
                 if (cursor is RecordDecl recordDecl)
                 {
                     if (_config.ExcludeEmptyRecords && IsEmptyRecord(recordDecl))
@@ -2411,11 +4059,13 @@ namespace ClangSharp
                     }
                     else if ((functionDecl is CXXMethodDecl cxxMethodDecl) && IsConflictingMethodDecl(cxxMethodDecl, cxxMethodDecl.Parent))
                     {
-                        isExcludedByConflictingDefinition = true;
+                        isExcludedValue |= 0b10;
                     }
                 }
 
-                if (_config.ExcludedNames.Contains(qualifiedName) || _config.ExcludedNames.Contains(qualifiedName.Replace("::", ".")))
+                var dottedQualifiedName = qualifiedName.Replace("::", ".");
+
+                if (_config.ExcludedNames.Contains(qualifiedName) || _config.ExcludedNames.Contains(dottedQualifiedName))
                 {
                     if (_config.LogExclusions)
                     {
@@ -2425,7 +4075,7 @@ namespace ClangSharp
                         {
                             message += "; Exclusion is unnecessary due to a config option";
                         }
-                        else if (isExcludedByConflictingDefinition)
+                        else if ((isExcludedValue & 0b10) != 0)
                         {
                             message += "; Exclusion is unnecessary due to a conflicting definition";
                         }
@@ -2435,7 +4085,9 @@ namespace ClangSharp
                     return true;
                 }
 
-                if (_config.ExcludedNames.Contains(name))
+                var dottedQualifiedNameWithoutParameters = qualifiedNameWithoutParameters.Replace("::", ".");
+
+                if (_config.ExcludedNames.Contains(qualifiedNameWithoutParameters) || _config.ExcludedNames.Contains(dottedQualifiedNameWithoutParameters) || _config.ExcludedNames.Contains(name))
                 {
                     if (_config.LogExclusions)
                     {
@@ -2445,7 +4097,7 @@ namespace ClangSharp
                         {
                             message += "; Exclusion is unnecessary due to a config option";
                         }
-                        else if (isExcludedByConflictingDefinition)
+                        else if ((isExcludedValue & 0b10) != 0)
                         {
                             message += "; Exclusion is unnecessary due to a conflicting definition";
                         }
@@ -2464,7 +4116,20 @@ namespace ClangSharp
                     return true;
                 }
 
-                if (isExcludedByConflictingDefinition)
+                if (_config.IncludedNames.Any() && !_config.IncludedNames.Contains(qualifiedName)
+                                                && !_config.IncludedNames.Contains(dottedQualifiedName)
+                                                && !_config.IncludedNames.Contains(qualifiedNameWithoutParameters)
+                                                && !_config.IncludedNames.Contains(dottedQualifiedNameWithoutParameters)
+                                                && !_config.IncludedNames.Contains(name))
+                {
+                    if (_config.LogExclusions)
+                    {
+                        AddDiagnostic(DiagnosticLevel.Info, $"Excluded {kind} '{qualifiedName}' as it was not in the include list");
+                    }
+                    return true;
+                }
+
+                if ((isExcludedValue & 0b10) != 0)
                 {
                     if (_config.LogExclusions)
                     {
@@ -2493,7 +4158,7 @@ namespace ClangSharp
                 {
                     return true;
                 }
-                else if ((_config.TraversalNames.Length == 0) && location.IsFromMainFile)
+                else if (!_config.TraversalNames.Any() && location.IsFromMainFile)
                 {
                     return true;
                 }
@@ -2519,60 +4184,89 @@ namespace ClangSharp
 
                 if ((parmVarDecl != null) && (parmVarDecl.Type is PointerType pointerType))
                 {
-                    var typeName = GetTypeName(parmVarDecl, context: null, pointerType.PointeeType, out var nativeTypeName);
+                    var typeName = GetTypeName(parmVarDecl, context: null, pointerType.PointeeType, ignoreTransparentStructsWhereRequired: false, out var nativeTypeName);
                     return name.StartsWith($"{nativeTypeName}_") || name.StartsWith($"{typeName}_") || (typeName == "IRpcStubBuffer");
                 }
                 return false;
             }
 
-            bool IsConflictingMethodDecl(CXXMethodDecl cxxMethodDecl, CXXRecordDecl cxxRecordDecl)
+            bool IsConflictingMethodDecl(CXXMethodDecl cxxMethodDeclToMatch, CXXRecordDecl cxxRecordDecl)
             {
-                var cxxMethodName = GetRemappedCursorName(cxxMethodDecl);
-                var cxxMethodDeclIndex = -1;
+                var cxxMethodDeclToMatchName = GetRemappedCursorName(cxxMethodDeclToMatch);
+                var foundCxxMethodDeclToMatch = false;
 
-                for (var i = 0; i < cxxRecordDecl.Methods.Count; i++)
+                foreach (var cxxBaseSpecifier in cxxRecordDecl.Bases)
                 {
-                    var methodDecl = cxxRecordDecl.Methods[i];
-                    var methodName = GetRemappedCursorName(methodDecl);
+                    var baseCxxRecordDecl = GetRecordDecl(cxxBaseSpecifier);
 
-                    if (cxxMethodName != methodName)
+                    if (ContainsConflictingMethodDecl(cxxMethodDeclToMatch, cxxRecordDecl, baseCxxRecordDecl, cxxMethodDeclToMatchName, ref foundCxxMethodDeclToMatch))
                     {
-                        continue;
+                        return true;
+                    }
+                }
+
+                return ContainsConflictingMethodDecl(cxxMethodDeclToMatch, cxxRecordDecl, cxxRecordDecl, cxxMethodDeclToMatchName, ref foundCxxMethodDeclToMatch);
+
+                bool ContainsConflictingMethodDecl(CXXMethodDecl cxxMethodDeclToMatch, CXXRecordDecl rootCxxRecordDecl, CXXRecordDecl cxxRecordDecl, string cxxMethodDeclToMatchName, ref bool foundCxxMethodDeclToMatch)
+                {
+                    var cxxMethodDecls = cxxRecordDecl.Methods;
+
+                    if (cxxMethodDecls.Count != 0)
+                    {
+                        foreach (var cxxMethodDecl in cxxMethodDecls.OrderBy((cxxmd) => cxxmd.VtblIndex))
+                        {
+                            if (IsConflictingMethodDecl(cxxMethodDeclToMatch, cxxMethodDecl, rootCxxRecordDecl, cxxRecordDecl, cxxMethodDeclToMatchName, ref foundCxxMethodDeclToMatch))
+                            {
+                                return true;
+                            }
+                        }
                     }
 
-                    if (cxxMethodDecl == methodDecl)
+                    return false;
+                }
+
+                bool IsConflictingMethodDecl(CXXMethodDecl cxxMethodDeclToMatch, CXXMethodDecl cxxMethodDecl, CXXRecordDecl rootCxxRecordDecl, CXXRecordDecl cxxRecordDecl, string cxxMethodDeclToMatchName, ref bool foundCxxMethodDeclToMatch)
+                {
+                    var methodName = GetRemappedCursorName(cxxMethodDecl);
+
+                    if (cxxMethodDeclToMatchName != methodName)
                     {
-                        cxxMethodDeclIndex = i;
-                        continue;
+                        return false;
                     }
 
-                    if (cxxMethodDecl.Parameters.Count != methodDecl.Parameters.Count)
+                    if (cxxMethodDecl == cxxMethodDeclToMatch)
                     {
-                        continue;
+                        foundCxxMethodDeclToMatch = true;
+                        return false;
+                    }
+
+                    if (cxxMethodDecl.Parameters.Count != cxxMethodDeclToMatch.Parameters.Count)
+                    {
+                        return false;
                     }
 
                     var allMatch = true;
 
-                    for (var n = 0; n < cxxMethodDecl.Parameters.Count; n++)
+                    for (var n = 0; n < cxxMethodDeclToMatch.Parameters.Count; n++)
                     {
-                        var baseParameterType = cxxMethodDecl.Parameters[n].Type.CanonicalType;
-                        var thisParameterType = methodDecl.Parameters[n].Type.CanonicalType;
+                        var parameterTypeToMatch = cxxMethodDeclToMatch.Parameters[n].Type.CanonicalType;
+                        var parameterType = cxxMethodDecl.Parameters[n].Type.CanonicalType;
 
-                        if (baseParameterType == thisParameterType)
+                        if (parameterType == parameterTypeToMatch)
                         {
                             continue;
                         }
 
-                        if ((baseParameterType is PointerType basePointerType) &&
-                            (thisParameterType is ReferenceType thisReferenceType) &&
-                            (basePointerType.PointeeType.CanonicalType == thisReferenceType.PointeeType.CanonicalType))
+                        if ((parameterTypeToMatch is PointerType pointerTypeToMatch) &&
+                            (parameterType is ReferenceType referenceType) &&
+                            (referenceType.PointeeType.CanonicalType == pointerTypeToMatch.PointeeType.CanonicalType))
                         {
                             continue;
                         }
 
-                        if ((baseParameterType is ReferenceType baseReferenceType) &&
-                            (thisParameterType is PointerType thisPointerType) &&
-                            (baseReferenceType.PointeeType.CanonicalType == thisPointerType.PointeeType.CanonicalType))
+                        if ((parameterTypeToMatch is ReferenceType referenceTypeToMatch) &&
+                            (parameterType is PointerType pointerType) &&
+                            (pointerType.PointeeType.CanonicalType == referenceTypeToMatch.PointeeType.CanonicalType))
                         {
                             continue;
                         }
@@ -2581,39 +4275,56 @@ namespace ClangSharp
                         break;
                     }
 
-                    if (allMatch)
+                    if (!allMatch)
                     {
-                        // An index of -1 means we found a conflict before encountering
-                        // ourselves. Since we generally want to prefer the first declaration,
-                        // we want to classify ourselves as the conflicting instance.
-                        return cxxMethodDeclIndex == -1;
+                        return false;
                     }
-                }
 
-                foreach (var @base in cxxRecordDecl.Bases)
-                {
-                    CXXRecordDecl baseRecordDecl;
-
-                    if (@base.Referenced is CXXRecordDecl baseCXXRecordDecl)
+                    if (cxxMethodDecl.IsVirtual)
                     {
-                        baseRecordDecl = baseCXXRecordDecl;
+                        if (cxxMethodDeclToMatch.IsVirtual)
+                        {
+                            if (rootCxxRecordDecl != cxxRecordDecl)
+                            {
+                                // The found declaration and declaration to match are both virtual
+                                // We want to treat the one from the base declaration as non-conflicting
+                                // So return true to report the declration to match as the conflict
+                                return true;
+                            }
+                            else if (cxxMethodDeclToMatch.IsThisDeclarationADefinition != cxxMethodDecl.IsThisDeclarationADefinition)
+                            {
+                                return false;
+                            }
+                            else
+                            {
+                                AddDiagnostic(DiagnosticLevel.Error, "Found conflicting method definitions for two virtual methods.", cxxMethodDeclToMatch);
+                            }
+                        }
+                        else
+                        {
+                            // The found declaration is virtual while the declaration to match is not
+                            // We want to treat the virtual declaration as non-conflicting
+                            // So return true to report the declration to match as the conflict
+                            return true;
+                        }
                     }
-                    else if (@base.Referenced is TypedefDecl typedefDecl)
+                    else if (cxxMethodDeclToMatch.IsVirtual)
                     {
-                        baseRecordDecl = (CXXRecordDecl)((RecordType)typedefDecl.TypeForDecl.CanonicalType).Decl;
+                        // The declaration to match is virtual while the found declaration is not
+                        // We want to treat the virtual declaration as non-conflicting
+                        // So treat the declaration as non-conflicting and continue searching
+                        return false;
                     }
                     else
                     {
-                        continue;
+                        // Neither the declaration nor the declaration to match are virtual
+                        // We want to pick whichever declaration appears first
+                        // So return true or false based on if we already encounted the declaration to match
+                        return !foundCxxMethodDeclToMatch;
                     }
 
-                    if (IsConflictingMethodDecl(cxxMethodDecl, baseRecordDecl))
-                    {
-                        return true;
-                    }
+                    return false;
                 }
-
-                return false;
             }
 
             bool IsEmptyRecord(RecordDecl recordDecl)
@@ -2650,7 +4361,7 @@ namespace ClangSharp
                 {
                     foreach (var cxxBaseSpecifier in cxxRecordDecl.Bases)
                     {
-                        var baseCxxRecordDecl = GetRecordDeclForBaseSpecifier(cxxBaseSpecifier);
+                        var baseCxxRecordDecl = GetRecordDecl(cxxBaseSpecifier);
 
                         if (!IsEmptyRecord(baseCxxRecordDecl))
                         {
@@ -2706,7 +4417,7 @@ namespace ClangSharp
             }
             else if (type is TypedefType typedefType)
             {
-                var name = GetTypeName(cursor, context: null, type, out _);
+                var name = GetTypeName(cursor, context: null, type, ignoreTransparentStructsWhereRequired: false, out _);
 
                 if (!_config.RemappedNames.TryGetValue(name, out var remappedName))
                 {
@@ -2726,46 +4437,69 @@ namespace ClangSharp
             }
         }
 
-        private bool IsPrevContextDecl<T>(out T value)
+        private bool IsNativeTypeNameEquivalent(string nativeTypeName, string typeName)
+        {
+            if (nativeTypeName.Equals(typeName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (nativeTypeName.Replace(" ", "").Equals(typeName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool IsPrevContextDecl<T>(out T cursor, out object userData)
             where T : Decl
         {
             var previousContext = _context.Last.Previous;
 
-            while (previousContext.Value is not Decl)
+            while (previousContext.Value.Cursor is not Decl)
             {
                 previousContext = previousContext.Previous;
             }
 
-            if (previousContext.Value is T t)
+            var value = previousContext.Value;
+
+            if (value.Cursor is T t)
             {
-                value = t;
+                cursor = t;
+                userData = value.UserData;
                 return true;
             }
             else
             {
-                value = null;
+                cursor = null;
+                userData = null;
                 return false;
             }
         }
 
-        private bool IsPrevContextStmt<T>(out T value)
+        private bool IsPrevContextStmt<T>(out T cursor, out object userData, bool preserveParen = false, bool preserveImplicitCast = false)
             where T : Stmt
         {
             var previousContext = _context.Last.Previous;
 
-            while (previousContext.Value is ParenExpr or ImplicitCastExpr)
+            while ((!preserveParen && (previousContext.Value.Cursor is ParenExpr)) || (!preserveImplicitCast && (previousContext.Value.Cursor is ImplicitCastExpr)))
             {
                 previousContext = previousContext.Previous;
             }
 
-            if (previousContext.Value is T t)
+            var value = previousContext.Value;
+
+            if (value.Cursor is T t)
             {
-                value = t;
+                cursor = t;
+                userData = value.UserData;
                 return true;
             }
             else
             {
-                value = null;
+                cursor = null;
+                userData = null;
                 return false;
             }
         }
@@ -2833,8 +4567,35 @@ namespace ClangSharp
             }
         }
 
+        private static bool IsTransparentStructBoolean(PInvokeGeneratorTransparentStructKind kind)
+        {
+            return kind == PInvokeGeneratorTransparentStructKind.Boolean;
+        }
+
+        private static bool IsTransparentStructHandle(PInvokeGeneratorTransparentStructKind kind)
+        {
+            return kind is PInvokeGeneratorTransparentStructKind.Handle
+                        or PInvokeGeneratorTransparentStructKind.HandleWin32;
+        }
+
+        private static bool IsTransparentStructHexBased(PInvokeGeneratorTransparentStructKind kind)
+        {
+            return IsTransparentStructHandle(kind)
+                || (kind == PInvokeGeneratorTransparentStructKind.TypedefHex);
+        }
+
         private bool IsUnchecked(string targetTypeName, Stmt stmt)
         {
+            if (IsPrevContextDecl<VarDecl>(out var parentVarDecl, out _))
+            {
+                var cursorName = GetCursorName(parentVarDecl);
+
+                if (cursorName.StartsWith("ClangSharpMacro_") && _config.WithTransparentStructs.TryGetValue(targetTypeName, out var transparentStruct))
+                {
+                    targetTypeName = transparentStruct.Name;
+                }
+            }
+
             switch (stmt.StmtClass)
             {
                 // case CX_StmtClass.CX_StmtClass_BinaryConditionalOperator:
@@ -2885,8 +4646,16 @@ namespace ClangSharp
                     return false;
                 }
 
-                // case CX_StmtClass.CX_StmtClass_CXXTemporaryObjectExpr:
-                // case CX_StmtClass.CX_StmtClass_CXXDefaultArgExpr:
+                case CX_StmtClass.CX_StmtClass_CXXTemporaryObjectExpr:
+                {
+                    return false;
+                }
+
+                case CX_StmtClass.CX_StmtClass_CXXDefaultArgExpr:
+                {
+                    return false;
+                }
+
                 // case CX_StmtClass.CX_StmtClass_CXXDefaultInitExpr:
                 // case CX_StmtClass.CX_StmtClass_CXXDeleteExpr:
 
@@ -2914,11 +4683,20 @@ namespace ClangSharp
                 // case CX_StmtClass.CX_StmtClass_CXXRewrittenBinaryOperator:
                 // case CX_StmtClass.CX_StmtClass_CXXScalarValueInitExpr:
                 // case CX_StmtClass.CX_StmtClass_CXXStdInitializerListExpr:
-                // case CX_StmtClass.CX_StmtClass_CXXThisExpr:
+
+                case CX_StmtClass.CX_StmtClass_CXXThisExpr:
+                {
+                    return false;
+                }
+
                 // case CX_StmtClass.CX_StmtClass_CXXThrowExpr:
                 // case CX_StmtClass.CX_StmtClass_CXXTypeidExpr:
                 // case CX_StmtClass.CX_StmtClass_CXXUnresolvedConstructExpr:
-                // case CX_StmtClass.CX_StmtClass_CXXUuidofExpr:
+
+                case CX_StmtClass.CX_StmtClass_CXXUuidofExpr:
+                {
+                    return false;
+                }
 
                 case CX_StmtClass.CX_StmtClass_CallExpr:
                 {
@@ -3033,7 +4811,11 @@ namespace ClangSharp
                 // case CX_StmtClass.CX_StmtClass_LambdaExpr:
                 // case CX_StmtClass.CX_StmtClass_MSPropertyRefExpr:
                 // case CX_StmtClass.CX_StmtClass_MSPropertySubscriptExpr:
-                // case CX_StmtClass.CX_StmtClass_MaterializeTemporaryExpr:
+
+                case CX_StmtClass.CX_StmtClass_MaterializeTemporaryExpr:
+                {
+                    return false;
+                }
 
                 case CX_StmtClass.CX_StmtClass_MemberExpr:
                 {
@@ -3057,7 +4839,12 @@ namespace ClangSharp
                 // case CX_StmtClass.CX_StmtClass_ObjCSelectorExpr:
                 // case CX_StmtClass.CX_StmtClass_ObjCStringLiteral:
                 // case CX_StmtClass.CX_StmtClass_ObjCSubscriptRefExpr:
-                // case CX_StmtClass.CX_StmtClass_OffsetOfExpr:
+
+                case CX_StmtClass.CX_StmtClass_OffsetOfExpr:
+                {
+                    return false;
+                }
+
                 // case CX_StmtClass.CX_StmtClass_OpaqueValueExpr:
                 // case CX_StmtClass.CX_StmtClass_UnresolvedLookupExpr:
                 // case CX_StmtClass.CX_StmtClass_UnresolvedMemberExpr:
@@ -3132,7 +4919,7 @@ namespace ClangSharp
                                 case "short":
                                 case "Int16":
                                 {
-                                    return (size32 != size64) || !IsPrevContextDecl<VarDecl>(out _);
+                                    return (size32 != size64) || !IsPrevContextDecl<VarDecl>(out _, out _);
                                 }
 
                                 case "ulong":
@@ -3163,9 +4950,38 @@ namespace ClangSharp
                 case CX_StmtClass.CX_StmtClass_UnaryOperator:
                 {
                     var unaryOperator = (UnaryOperator)stmt;
-                    return IsUnchecked(targetTypeName, unaryOperator.SubExpr)
-                        || IsUnchecked(targetTypeName, unaryOperator.Handle.Evaluate)
-                        || ((unaryOperator.Opcode == CX_UnaryOperatorKind.CX_UO_Minus) && IsUnsigned(targetTypeName));
+
+                    if (IsUnchecked(targetTypeName, unaryOperator.SubExpr))
+                    {
+                        return true;
+                    }
+
+                    var evaluation = unaryOperator.Handle.Evaluate;
+
+                    if (IsUnchecked(targetTypeName, evaluation))
+                    {
+                        return true;
+                    }
+
+                    var sourceTypeName = GetTypeName(stmt, context: null, unaryOperator.SubExpr.Type, ignoreTransparentStructsWhereRequired: false, out _);
+
+                    switch (unaryOperator.Opcode)
+                    {
+                        case CX_UnaryOperatorKind.CX_UO_Minus:
+                        {
+                            return IsUnsigned(targetTypeName);
+                        }
+
+                        case CX_UnaryOperatorKind.CX_UO_Not:
+                        {
+                            return IsUnsigned(targetTypeName) != IsUnsigned(sourceTypeName);
+                        }
+
+                        default:
+                        {
+                            return false;
+                        }
+                    }
                 }
 
                 // case CX_StmtClass.CX_StmtClass_VAArgExpr:
@@ -3182,12 +4998,45 @@ namespace ClangSharp
                 var lhs = binaryOperator.LHS;
                 var rhs = binaryOperator.RHS;
 
-                if (!IsStmtAsWritten<IntegerLiteral>(lhs, out var lhsIntegerLiteral, removeParens: true) || !IsStmtAsWritten<IntegerLiteral>(rhs, out var rhsIntegerLiteral, removeParens: true))
+                long lhsValue, rhsValue;
+
+                if (IsStmtAsWritten<IntegerLiteral>(lhs, out var lhsIntegerLiteral, removeParens: true))
                 {
-                    return false;
+                    lhsValue = lhsIntegerLiteral.Value;
+                }
+                else
+                {
+                    var lhsEvaluation = lhs.Handle.Evaluate;
+
+                    if (lhsEvaluation.Kind == CXEvalResultKind.CXEval_Int)
+                    {
+                        lhsValue = lhsEvaluation.AsInt;
+                    }
+                    else
+                    {
+                        return false;
+                    }
                 }
 
-                var targetTypeName = GetRemappedTypeName(binaryOperator, context: null, binaryOperator.Type, out _);
+                if (IsStmtAsWritten<IntegerLiteral>(rhs, out var rhsIntegerLiteral, removeParens: true))
+                {
+                    rhsValue = rhsIntegerLiteral.Value;
+                }
+                else
+                {
+                    var rhsEvaluation = rhs.Handle.Evaluate;
+
+                    if (rhsEvaluation.Kind == CXEvalResultKind.CXEval_Int)
+                    {
+                        rhsValue = rhsEvaluation.AsInt;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+
+                var targetTypeName = GetRemappedTypeName(binaryOperator, context: null, binaryOperator.Type, out _, skipUsing: true);
                 var isUnsigned = IsUnsigned(targetTypeName);
 
                 switch (binaryOperator.Opcode)
@@ -3195,15 +5044,15 @@ namespace ClangSharp
                     case CX_BinaryOperatorKind.CX_BO_Add:
                     {
                         return isUnsigned
-                            ? (ulong)lhsIntegerLiteral.Value + (ulong)rhsIntegerLiteral.Value < (ulong)lhsIntegerLiteral.Value
-                            : lhsIntegerLiteral.Value + rhsIntegerLiteral.Value < lhsIntegerLiteral.Value;
+                            ? (ulong)lhsValue + (ulong)rhsValue < (ulong)lhsValue
+                            : lhsValue + rhsValue < lhsValue;
                     }
 
                     case CX_BinaryOperatorKind.CX_BO_Sub:
                     {
                         return isUnsigned
-                            ? (ulong)lhsIntegerLiteral.Value - (ulong)rhsIntegerLiteral.Value > (ulong)lhsIntegerLiteral.Value
-                            : lhsIntegerLiteral.Value - rhsIntegerLiteral.Value > lhsIntegerLiteral.Value;
+                            ? (ulong)lhsValue - (ulong)rhsValue > (ulong)lhsValue
+                            : lhsValue - rhsValue > lhsValue;
                     }
 
                     default:
@@ -3214,7 +5063,7 @@ namespace ClangSharp
             }
         }
 
-        private static bool IsUnchecked(string typeName, CXEvalResult evalResult)
+        private bool IsUnchecked(string typeName, CXEvalResult evalResult)
         {
             if (evalResult.Kind != CXEvalResultKind.CXEval_Int)
             {
@@ -3225,7 +5074,7 @@ namespace ClangSharp
             return IsUnchecked(typeName, signedValue, signedValue < 0, isHex: false);
         }
 
-        private static bool IsUnchecked(string typeName, long signedValue, bool isNegative, bool isHex)
+        private bool IsUnchecked(string typeName, long signedValue, bool isNegative, bool isHex)
         {
             switch (typeName)
             {
@@ -3246,6 +5095,7 @@ namespace ClangSharp
                 case "uint":
                 case "UInt32":
                 case "nuint":
+                case "UIntPtr":
                 {
                     return false;
                 }
@@ -3271,6 +5121,7 @@ namespace ClangSharp
                 case "int":
                 case "Int32":
                 case "nint":
+                case "IntPtr":
                 {
                     return (signedValue < int.MinValue) || (int.MaxValue < signedValue) || (isNegative && isHex);
                 }
@@ -3294,7 +5145,7 @@ namespace ClangSharp
 
             if (type.CanonicalType is ConstantArrayType)
             {
-                var name = GetTypeName(fieldDecl, context: null, type, out _);
+                var name = GetTypeName(fieldDecl, context: null, type, ignoreTransparentStructsWhereRequired: false, out _);
 
                 if (!_config.RemappedNames.TryGetValue(name, out var remappedName))
                 {
@@ -3309,6 +5160,13 @@ namespace ClangSharp
 
         private bool IsUnsafe(FunctionDecl functionDecl)
         {
+            var name = GetRemappedCursorName(functionDecl);
+
+            if (_config.WithManualImports.Contains(name))
+            {
+                return true;
+            }
+
             if (IsUnsafe(functionDecl, functionDecl.ReturnType))
             {
                 return true;
@@ -3344,7 +5202,7 @@ namespace ClangSharp
                     return true;
                 }
             }
-            return (recordDecl is CXXRecordDecl cxxRecordDecl) && HasVtbl(cxxRecordDecl);
+            return (recordDecl is CXXRecordDecl cxxRecordDecl) && (HasVtbl(cxxRecordDecl, out var hasBaseVtbl) || hasBaseVtbl || HasUnsafeMethod(cxxRecordDecl));
         }
 
         private bool IsUnsafe(TypedefDecl typedefDecl, FunctionProtoType functionProtoType)
@@ -3369,7 +5227,7 @@ namespace ClangSharp
 
         private bool IsUnsafe(NamedDecl namedDecl, Type type)
         {
-            var name = GetTypeName(namedDecl, context: null, type, out _);
+            var name = GetTypeName(namedDecl, context: null, type, ignoreTransparentStructsWhereRequired: false, out _);
 
             if (!_config.RemappedNames.TryGetValue(name, out var remappedName))
             {
@@ -3468,8 +5326,7 @@ namespace ClangSharp
             return (name.Equals("GetHashCode")
                 || name.Equals("GetType")
                 || name.Equals("MemberwiseClone")
-                || name.Equals("ToString"))
-&& parmVarDecls.Count == 0;
+                || name.Equals("ToString")) && parmVarDecls.Count == 0;
         }
 
         private void ParenthesizeStmt(Stmt stmt)
@@ -3509,6 +5366,12 @@ namespace ClangSharp
 
         private void StartUsingOutputBuilder(string name, bool includeTestOutput = false)
         {
+            var nameTests = $"{name}Tests";
+
+            // Set the current namespace so subsequent type lookups add the right using
+            _currentNamespace = GetNamespace(name);
+            _currentClass = name;
+
             if (_outputBuilder != null)
             {
                 Debug.Assert(_outputBuilderUsers >= 1);
@@ -3518,6 +5381,17 @@ namespace ClangSharp
 
                 if (includeTestOutput && !string.IsNullOrWhiteSpace(_config.TestOutputLocation))
                 {
+                    if (_testOutputBuilder is null)
+                    {
+                        if (!_outputBuilderFactory.TryGetOutputBuilder(nameTests, out var testOutputBuilder))
+                        {
+                            CreateTestOutputBuilder(name, nameTests);
+                        }
+                        else
+                        {
+                            _testOutputBuilder = (CSharpOutputBuilder)testOutputBuilder;
+                        }
+                    }
                     _testOutputBuilder.NeedsNewline = true;
                 }
                 return;
@@ -3529,26 +5403,9 @@ namespace ClangSharp
             {
                 _outputBuilder = _outputBuilderFactory.Create(name);
 
-                WithAttributes("*");
-                WithAttributes(name);
-
-                WithUsings("*");
-                WithUsings(name);
-
                 if (includeTestOutput && !string.IsNullOrWhiteSpace(_config.TestOutputLocation))
                 {
-                    _testOutputBuilder = _outputBuilderFactory.CreateTests($"{name}Tests");
-
-                    _testOutputBuilder.AddUsingDirective("System.Runtime.InteropServices");
-
-                    if (_config.GenerateTestsNUnit)
-                    {
-                        _testOutputBuilder.AddUsingDirective("NUnit.Framework");
-                    }
-                    else if (_config.GenerateTestsXUnit)
-                    {
-                        _testOutputBuilder.AddUsingDirective("Xunit");
-                    }
+                    CreateTestOutputBuilder(name, nameTests);
                 }
             }
             else
@@ -3557,18 +5414,49 @@ namespace ClangSharp
 
                 if (includeTestOutput && !string.IsNullOrWhiteSpace(_config.TestOutputLocation))
                 {
-                    _testOutputBuilder = _outputBuilderFactory.GetTestOutputBuilder($"{name}Tests");
+                    if (!_outputBuilderFactory.TryGetOutputBuilder(nameTests, out var testOutputBuilder))
+                    {
+                        CreateTestOutputBuilder(name, nameTests);
+                    }
+                    else
+                    {
+                        _testOutputBuilder = (CSharpOutputBuilder)testOutputBuilder;
+                    }
+
                     Debug.Assert(_testOutputBuilder.IsTestOutput);
                     _testOutputBuilder.NeedsNewline = true;
                 }
             }
             _outputBuilderUsers++;
+
+            void CreateTestOutputBuilder(string name, string nameTests)
+            {
+                _testOutputBuilder = _outputBuilderFactory.CreateTests(nameTests);
+
+                var isTopLevelStruct = _config.WithTypes.TryGetValue(name, out var withType) && (withType == "struct");
+
+                if (!_topLevelClassNames.Contains(name) || isTopLevelStruct)
+                {
+                    _testOutputBuilder.AddUsingDirective("System.Runtime.InteropServices");
+                }
+
+                if (_config.GenerateTestsNUnit)
+                {
+                    _testOutputBuilder.AddUsingDirective("NUnit.Framework");
+                }
+                else if (_config.GenerateTestsXUnit)
+                {
+                    _testOutputBuilder.AddUsingDirective("Xunit");
+                }
+            }
         }
 
         private void StopUsingOutputBuilder()
         {
             if (_outputBuilderUsers == 1)
             {
+                _currentClass = null;
+                _currentNamespace = null;
                 _outputBuilder = null;
                 _testOutputBuilder = null;
             }
@@ -3613,7 +5501,7 @@ namespace ClangSharp
             if (functionDecl is CXXConversionDecl)
             {
                 var returnType = functionDecl.ReturnType;
-                var returnTypeName = GetRemappedTypeName(cursor: null, context: null, returnType, out _);
+                var returnTypeName = GetRemappedTypeName(cursor: null, context: null, returnType, out _, skipUsing: true);
 
                 name = $"To{returnTypeName}";
                 return true;
@@ -3750,16 +5638,15 @@ namespace ClangSharp
 
         private void UncheckStmt(string targetTypeName, Stmt stmt)
         {
-            if (IsUnchecked(targetTypeName, stmt))
+            if (!_outputBuilder.IsUncheckedContext && IsUnchecked(targetTypeName, stmt))
             {
                 _outputBuilder.BeginUnchecked();
 
                 var needsCast = IsStmtAsWritten<IntegerLiteral>(stmt, out _, removeParens: true) && (stmt.DeclContext is EnumDecl);
 
-                if (IsStmtAsWritten<UnaryExprOrTypeTraitExpr>(stmt, out var unaryExprOrTypeTraitExpr, removeParens: true) && ((CurrentContext is VarDecl) || IsPrevContextDecl<VarDecl>(out _)))
+                if (IsStmtAsWritten<UnaryExprOrTypeTraitExpr>(stmt, out var unaryExprOrTypeTraitExpr, removeParens: true) && ((CurrentContext.Cursor is VarDecl) || IsPrevContextDecl<VarDecl>(out _, out _)))
                 {
                     var argumentType = unaryExprOrTypeTraitExpr.TypeOfArgument;
-
 
                     long alignment32 = -1;
                     long alignment64 = -1;
@@ -3807,13 +5694,13 @@ namespace ClangSharp
             }
             else
             {
-                Visit(stmt);
+                VisitStmt(stmt);
             }
         }
 
         private void Visit(Cursor cursor)
         {
-            var currentContext = _context.AddLast(cursor);
+            var currentContext = _context.AddLast((cursor, null));
             var currentStmtUsers = _stmtOutputBuilder is not null ? (int?)_stmtOutputBuilderUsers : null;
 
             if (cursor is Attr attr)
@@ -3830,7 +5717,16 @@ namespace ClangSharp
             }
             else if (cursor is Stmt stmt)
             {
-                VisitStmt(stmt);
+                var targetTypeName = GetTargetTypeName(PreviousContext.Cursor, out _);
+
+                if (targetTypeName != "")
+                {
+                    UncheckStmt(targetTypeName, stmt);
+                }
+                else
+                {
+                    VisitStmt(stmt);
+                }
             }
             else
             {
@@ -3852,13 +5748,15 @@ namespace ClangSharp
 
         private void Visit(IEnumerable<Cursor> cursors, IEnumerable<Cursor> excludedCursors) => Visit(cursors.Except(excludedCursors));
 
-        private void WithAttributes(string remappedName)
+        private void WithAttributes(NamedDecl namedDecl, bool onlySupportedOSPlatform = false, bool isTestOutput = false)
         {
-            if (_config.WithAttributes.TryGetValue(remappedName, out var attributes))
+            var outputBuilder = isTestOutput ? _testOutputBuilder : _outputBuilder;
+
+            if (TryGetRemappedValue(namedDecl, _config.WithAttributes, out var attributes))
             {
-                foreach (var attribute in attributes)
+                foreach (var attribute in attributes.Where((a) => !onlySupportedOSPlatform || a.StartsWith("SupportedOSPlatform(")))
                 {
-                    _outputBuilder.WriteCustomAttribute(attribute);
+                    outputBuilder.WriteCustomAttribute(attribute);
                 }
             }
         }
@@ -3870,8 +5768,208 @@ namespace ClangSharp
                 : libraryPath;
         }
 
-        private bool GetSetLastError(string remappedName) => _config.WithSetLastErrors.Contains("*") ||
-                                                             _config.WithSetLastErrors.Contains(remappedName);
+        private string GetClass(string remappedName, bool disallowPrefixMatch = false)
+        {
+            if (!TryGetClass(remappedName, out var className, disallowPrefixMatch))
+            {
+                className = _config.DefaultClass;
+                _ = _topLevelClassNames.Add(className);
+                _ = _topLevelClassNames.Add($"{className}Tests");
+            }
+            return className;
+        }
+
+        private bool TryGetClass(string remappedName, out string className, bool disallowPrefixMatch = false)
+        {
+            var index = remappedName.IndexOf('*');
+
+            if (index != -1)
+            {
+                remappedName = remappedName[..index];
+            }
+
+            if (_config.WithClasses.TryGetValue(remappedName, out className))
+            {
+                _ = _topLevelClassNames.Add(className);
+                _ = _topLevelClassNames.Add($"{className}Tests");
+                return true;
+            }
+
+            if (disallowPrefixMatch)
+            {
+                return false;
+            }
+
+            foreach (var withClass in _config.WithClasses)
+            {
+                if (!withClass.Key.EndsWith("*"))
+                {
+                    continue;
+                }
+
+                var prefix = withClass.Key[0..^1];
+
+                if (remappedName.StartsWith(prefix))
+                {
+                    className = withClass.Value;
+                    _ = _topLevelClassNames.Add(className);
+                    _ = _topLevelClassNames.Add($"{className}Tests");
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private string GetNamespace(string remappedName)
+        {
+            if (!TryGetNamespace(remappedName, out var namespaceName))
+            {
+                if (s_needsSystemSupportRegex.IsMatch(remappedName))
+                {
+                    namespaceName = "System";
+                }
+                else
+                {
+                    namespaceName = _config.DefaultNamespace;
+                }
+            }
+            return namespaceName;
+        }
+
+        private bool TryGetNamespace(string remappedName, out string namespaceName)
+        {
+            var index = remappedName.IndexOf('*');
+
+            if (index != -1)
+            {
+                remappedName = remappedName[..index];
+            }
+
+            return _config.WithNamespaces.TryGetValue(remappedName, out namespaceName);
+        }
+
+        private bool GetSetLastError(NamedDecl namedDecl) => HasRemapping(namedDecl, _config.WithSetLastErrors, matchStar: true);
+
+        private bool HasRemapping(NamedDecl namedDecl, IReadOnlyCollection<string> entries, bool matchStar = false)
+        {
+            var name = GetCursorQualifiedName(namedDecl);
+
+            if (name.StartsWith("ClangSharpMacro_"))
+            {
+                name = name["ClangSharpMacro_".Length..];
+            }
+
+            if (entries.Contains(name))
+            {
+                return true;
+            }
+
+            name = name.Replace("::", ".");
+
+            if (entries.Contains(name))
+            {
+                return true;
+            }
+
+            name = GetCursorQualifiedName(namedDecl, truncateFunctionParameters: true);
+
+            if (name.StartsWith("ClangSharpMacro_"))
+            {
+                name = name["ClangSharpMacro_".Length..];
+            }
+
+            if (entries.Contains(name))
+            {
+                return true;
+            }
+
+            name = name.Replace("::", ".");
+
+            if (entries.Contains(name))
+            {
+                return true;
+            }
+
+            name = GetRemappedCursorName(namedDecl);
+
+            if (name.StartsWith("ClangSharpMacro_"))
+            {
+                name = name["ClangSharpMacro_".Length..];
+            }
+
+            if (entries.Contains(name))
+            {
+                return true;
+            }
+
+            if (matchStar && entries.Contains("*"))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryGetRemappedValue<T>(NamedDecl namedDecl, IReadOnlyDictionary<string, T> remappings, out T value, bool matchStar = false)
+        {
+            var name = GetCursorQualifiedName(namedDecl);
+
+            if (name.StartsWith("ClangSharpMacro_"))
+            {
+                name = name["ClangSharpMacro_".Length..];
+            }
+
+            if (remappings.TryGetValue(name, out value))
+            {
+                return true;
+            }
+
+            name = name.Replace("::", ".");
+
+            if (remappings.TryGetValue(name, out value))
+            {
+                return true;
+            }
+
+            name = GetCursorQualifiedName(namedDecl, truncateFunctionParameters: true);
+
+            if (name.StartsWith("ClangSharpMacro_"))
+            {
+                name = name["ClangSharpMacro_".Length..];
+            }
+
+            if (remappings.TryGetValue(name, out value))
+            {
+                return true;
+            }
+
+            name = name.Replace("::", ".");
+
+            if (remappings.TryGetValue(name, out value))
+            {
+                return true;
+            }
+
+            name = GetRemappedCursorName(namedDecl);
+
+            if (name.StartsWith("ClangSharpMacro_"))
+            {
+                name = name["ClangSharpMacro_".Length..];
+            }
+
+            if (remappings.TryGetValue(name, out value))
+            {
+                return true;
+            }
+
+            if (matchStar && remappings.TryGetValue("*", out value))
+            {
+                return true;
+            }
+
+            value = default;
+            return false;
+        }
 
         private void WithTestAttribute()
         {
@@ -3933,9 +6031,9 @@ namespace ClangSharp
             }
         }
 
-        private void WithType(string remappedName, ref string integerTypeName, ref string nativeTypeName)
+        private void WithType(NamedDecl namedDecl, ref string integerTypeName, ref string nativeTypeName)
         {
-            if (_config.WithTypes.TryGetValue(remappedName, out var type))
+            if (TryGetRemappedValue(namedDecl, _config.WithTypes, out var type, matchStar: true))
             {
                 if (string.IsNullOrWhiteSpace(nativeTypeName))
                 {
@@ -3944,16 +6042,16 @@ namespace ClangSharp
 
                 integerTypeName = type;
 
-                if (nativeTypeName.Equals(type))
+                if (IsNativeTypeNameEquivalent(nativeTypeName, type))
                 {
                     nativeTypeName = string.Empty;
                 }
             }
         }
 
-        private void WithUsings(string remappedName)
+        private void WithUsings(NamedDecl namedDecl)
         {
-            if (_config.WithUsings.TryGetValue(remappedName, out var usings))
+            if (TryGetRemappedValue(namedDecl, _config.WithUsings, out var usings))
             {
                 foreach (var @using in usings)
                 {
@@ -3964,6 +6062,15 @@ namespace ClangSharp
 
         private CSharpOutputBuilder StartCSharpCode()
         {
+            if ((_outputBuilder == _testOutputBuilder) && (_testStmtOutputBuilder is null))
+            {
+                _testStmtOutputBuilder = _stmtOutputBuilder;
+                _testStmtOutputBuilderUsers = _stmtOutputBuilderUsers;
+
+                _stmtOutputBuilder = null;
+                _stmtOutputBuilderUsers = 0;
+            }
+
             if (_stmtOutputBuilder is null)
             {
                 _stmtOutputBuilder = _outputBuilder.BeginCSharpCode();
@@ -3983,7 +6090,19 @@ namespace ClangSharp
             if (_stmtOutputBuilderUsers <= 0)
             {
                 _outputBuilder.EndCSharpCode(_stmtOutputBuilder);
-                _stmtOutputBuilder = null;
+
+                if (_testStmtOutputBuilder is not null)
+                {
+                    _stmtOutputBuilder = _testStmtOutputBuilder;
+                    _stmtOutputBuilderUsers = _testStmtOutputBuilderUsers;
+
+                    _testStmtOutputBuilder = null;
+                    _testStmtOutputBuilderUsers = 0;
+                }
+                else
+                {
+                    _stmtOutputBuilder = null;
+                }
             }
         }
     }

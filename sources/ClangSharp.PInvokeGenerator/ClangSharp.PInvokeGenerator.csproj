@@ -1,14 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <RootNamespace>ClangSharp</RootNamespace>
-    <TargetFrameworks>
-      net5.0<!--;netcoreapp3.1;netstandard2.0-->
-    </TargetFrameworks>
-    <!-- TODO: I don't know -->
-    <LangVersion>9</LangVersion>
+    <TargetFrameworks>net6.0</TargetFrameworks>
   </PropertyGroup>
 
   <ItemGroup>

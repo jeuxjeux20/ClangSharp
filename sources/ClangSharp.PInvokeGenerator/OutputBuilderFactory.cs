@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.Collections.Generic;
@@ -12,18 +12,15 @@ namespace ClangSharp
 {
     internal sealed class OutputBuilderFactory
     {
-        private readonly PInvokeGeneratorOutputMode _mode;
-        private readonly string _namespace;
-        private readonly string _methodClassName;
+        private readonly PInvokeGeneratorConfiguration _config;
+        // private readonly string _methodClassName;
         private readonly bool _writeSourceLocation;
         private readonly Dictionary<string, IOutputBuilder> _outputBuilders;
 
-        public OutputBuilderFactory(PInvokeGeneratorConfiguration mode)
+        public OutputBuilderFactory(PInvokeGeneratorConfiguration config)
         {
-            _mode = mode.OutputMode;
-            _namespace = mode.Namespace;
-            _methodClassName = mode.MethodClassName;
-            _writeSourceLocation = mode.GenerateSourceLocationAttribute;
+            _config = config;
+            _writeSourceLocation = config.GenerateSourceLocationAttribute;
             _outputBuilders = new Dictionary<string, IOutputBuilder>();
         }
 
@@ -38,12 +35,12 @@ namespace ClangSharp
                 throw new ArgumentNullException(nameof(name));
             }
 
-            var outputBuilder = _mode switch
+            var outputBuilder = _config.OutputMode switch
             {
-                PInvokeGeneratorOutputMode.CSharp => (IOutputBuilder) new CSharpOutputBuilder(name, writeSourceLocation: _writeSourceLocation),
-                PInvokeGeneratorOutputMode.Xml => new XmlOutputBuilder(name),
-                PInvokeGeneratorOutputMode.JniGlue => new JniGlueOutputBuilder(name, _namespace, _methodClassName),
-                PInvokeGeneratorOutputMode.JavaClasses => new JavaClassesOutputBuilder(name, _namespace, _methodClassName),
+                PInvokeGeneratorOutputMode.CSharp => (IOutputBuilder) new CSharpOutputBuilder(name, _config, writeSourceLocation: _writeSourceLocation),
+                PInvokeGeneratorOutputMode.Xml => new XmlOutputBuilder(name, _config),
+                PInvokeGeneratorOutputMode.JniGlue => new JniGlueOutputBuilder(name, _config),
+                PInvokeGeneratorOutputMode.JavaClasses => new JavaClassesOutputBuilder(name, _config),
                 _ => throw new InvalidOperationException()
             };
 
@@ -58,7 +55,7 @@ namespace ClangSharp
                 throw new ArgumentNullException(nameof(name));
             }
 
-            var outputBuilder = new CSharpOutputBuilder(name, isTestOutput: true, writeSourceLocation: _writeSourceLocation);
+            var outputBuilder = new CSharpOutputBuilder(name, _config, isTestOutput: true, writeSourceLocation: _writeSourceLocation);
 
             _outputBuilders.Add(name, outputBuilder);
             return outputBuilder;

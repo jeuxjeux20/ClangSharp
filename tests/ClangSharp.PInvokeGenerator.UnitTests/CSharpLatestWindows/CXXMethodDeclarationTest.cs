@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.Runtime.InteropServices;
@@ -8,7 +8,7 @@ namespace ClangSharp.UnitTests
 {
     public sealed class CSharpLatestWindows_CXXMethodDeclarationTest : CXXMethodDeclarationTest
     {
-        public override Task ConstructorTest()
+        protected override Task ConstructorTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -38,7 +38,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ConstructorWithInitializeTest()
+        protected override Task ConstructorWithInitializeTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -93,7 +93,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ConversionTest()
+        protected override Task ConversionTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -123,7 +123,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task DestructorTest()
+        protected override Task DestructorTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -147,7 +147,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task InstanceTest()
+        protected override Task InstanceTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -164,14 +164,12 @@ namespace ClangSharp.UnitTests
     }
 };
 ";
-            var callConv = "Cdecl";
             var entryPoint = RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "__ZN8MyStruct12MyVoidMethodEv" : "_ZN8MyStruct12MyVoidMethodEv";
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
                 if (!Environment.Is64BitProcess)
                 {
-                    callConv = "ThisCall";
                     entryPoint = "?MyVoidMethod@MyStruct@@QAEXXZ";
                 }
                 else
@@ -184,17 +182,17 @@ namespace ClangSharp.UnitTests
 
 namespace ClangSharp.Test
 {{
-    public partial struct MyStruct
+    public unsafe partial struct MyStruct
     {{
-        [DllImport(""ClangSharpPInvokeGenerator"", CallingConvention = CallingConvention.{callConv}, EntryPoint = ""{entryPoint}"", ExactSpelling = true)]
-        public static extern void MyVoidMethod();
+        [DllImport(""ClangSharpPInvokeGenerator"", CallingConvention = CallingConvention.ThisCall, EntryPoint = ""{entryPoint}"", ExactSpelling = true)]
+        public static extern void MyVoidMethod(MyStruct* pThis);
 
         public int MyInt32Method()
         {{
             return 0;
         }}
 
-        public unsafe void* MyVoidStarMethod()
+        public void* MyVoidStarMethod()
         {{
             return null;
         }}
@@ -205,7 +203,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task MemberCallTest()
+        protected override Task MemberCallTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -278,7 +276,7 @@ int MyFunctionB(MyStruct* x)
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task MemberTest()
+        protected override Task MemberTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -308,7 +306,7 @@ int MyFunctionB(MyStruct* x)
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task NewKeywordTest()
+        protected override Task NewKeywordTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -408,7 +406,7 @@ int MyFunctionB(MyStruct* x)
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task NewKeywordVirtualTest()
+        protected override Task NewKeywordVirtualTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -416,13 +414,6 @@ int MyFunctionB(MyStruct* x)
     virtual int GetType() = 0;
     virtual int GetType(int objA, int objB) = 0;
 };";
-
-            var callConv = "Cdecl";
-
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && !Environment.Is64BitProcess)
-            {
-                callConv = "Thiscall";
-            }
 
             var expectedOutputContents = $@"using System.Runtime.CompilerServices;
 
@@ -432,19 +423,19 @@ namespace ClangSharp.Test
     {{
         public void** lpVtbl;
 
-        public int GetType(int obj)
+        public int GetType(int objA, int objB)
         {{
-            return ((delegate* unmanaged[{callConv}]<MyStruct*, int, int>)(lpVtbl[{(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? 2 : 0)}]))((MyStruct*)Unsafe.AsPointer(ref this), obj);
+            return ((delegate* unmanaged[Thiscall]<MyStruct*, int, int, int>)(lpVtbl[0]))((MyStruct*)Unsafe.AsPointer(ref this), objA, objB);
         }}
 
         public new int GetType()
         {{
-            return ((delegate* unmanaged[{callConv}]<MyStruct*, int>)(lpVtbl[1]))((MyStruct*)Unsafe.AsPointer(ref this));
+            return ((delegate* unmanaged[Thiscall]<MyStruct*, int>)(lpVtbl[1]))((MyStruct*)Unsafe.AsPointer(ref this));
         }}
 
-        public int GetType(int objA, int objB)
+        public int GetType(int obj)
         {{
-            return ((delegate* unmanaged[{callConv}]<MyStruct*, int, int, int>)(lpVtbl[{(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? 0 : 2)}]))((MyStruct*)Unsafe.AsPointer(ref this), objA, objB);
+            return ((delegate* unmanaged[Thiscall]<MyStruct*, int, int>)(lpVtbl[2]))((MyStruct*)Unsafe.AsPointer(ref this), obj);
         }}
     }}
 }}
@@ -453,7 +444,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task NewKeywordVirtualWithExplicitVtblTest()
+        protected override Task NewKeywordVirtualWithExplicitVtblTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -462,12 +453,10 @@ namespace ClangSharp.Test
     virtual int GetType(int objA, int objB) = 0;
 };";
 
-            var callConv = "Cdecl";
             var nativeCallConv = "";
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && !Environment.Is64BitProcess)
             {
-                callConv = "Thiscall";
                 nativeCallConv = " __attribute__((thiscall))";
             }
 
@@ -479,9 +468,9 @@ namespace ClangSharp.Test
     {{
         public Vtbl* lpVtbl;
 
-        public int GetType(int obj)
+        public int GetType(int objA, int objB)
         {{
-            return lpVtbl->GetType((MyStruct*)Unsafe.AsPointer(ref this), obj);
+            return lpVtbl->GetType((MyStruct*)Unsafe.AsPointer(ref this), objA, objB);
         }}
 
         public new int GetType()
@@ -489,21 +478,21 @@ namespace ClangSharp.Test
             return lpVtbl->GetType1((MyStruct*)Unsafe.AsPointer(ref this));
         }}
 
-        public int GetType(int objA, int objB)
+        public int GetType(int obj)
         {{
-            return lpVtbl->GetType2((MyStruct*)Unsafe.AsPointer(ref this), objA, objB);
+            return lpVtbl->GetType2((MyStruct*)Unsafe.AsPointer(ref this), obj);
         }}
 
         public partial struct Vtbl
         {{
-            [NativeTypeName(""{(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "int (int, int)" : "int (int)")}{nativeCallConv}"")]
-            public {(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "" : "new ")}delegate* unmanaged[{callConv}]<MyStruct*, int, int{(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? ", int" : "")}> GetType{(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "2" : "")};
+            [NativeTypeName(""int (int, int){nativeCallConv}"")]
+            public new delegate* unmanaged[Thiscall]<MyStruct*, int, int, int> GetType;
 
             [NativeTypeName(""int (){nativeCallConv}"")]
-            public delegate* unmanaged[{callConv}]<MyStruct*, int> GetType1;
+            public delegate* unmanaged[Thiscall]<MyStruct*, int> GetType1;
 
-            [NativeTypeName(""{(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "int (int)" : "int (int, int)")}{nativeCallConv}"")]
-            public {(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "new " : "")}delegate* unmanaged[{callConv}]<MyStruct*, int, int{(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "" : ", int")}> GetType{(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "" : "2")};
+            [NativeTypeName(""int (int){nativeCallConv}"")]
+            public delegate* unmanaged[Thiscall]<MyStruct*, int, int> GetType2;
         }}
     }}
 }}
@@ -512,7 +501,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents, PInvokeGeneratorConfigurationOptions.GenerateExplicitVtbls);
         }
 
-        public override Task OperatorTest()
+        protected override Task OperatorTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -564,7 +553,7 @@ MyStruct operator-(MyStruct lhs, MyStruct rhs)
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task OperatorCallTest()
+        protected override Task OperatorCallTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -636,7 +625,7 @@ MyStruct MyFunction2(MyStruct lhs, MyStruct rhs)
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task StaticTest()
+        protected override Task StaticTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -665,7 +654,7 @@ MyStruct MyFunction2(MyStruct lhs, MyStruct rhs)
 
 namespace ClangSharp.Test
 {{
-    public partial struct MyStruct
+    public unsafe partial struct MyStruct
     {{
         [DllImport(""ClangSharpPInvokeGenerator"", CallingConvention = CallingConvention.Cdecl, EntryPoint = ""{entryPoint}"", ExactSpelling = true)]
         public static extern void MyVoidMethod();
@@ -675,7 +664,7 @@ namespace ClangSharp.Test
             return 0;
         }}
 
-        public static unsafe void* MyVoidStarMethod()
+        public static void* MyVoidStarMethod()
         {{
             return null;
         }}
@@ -686,7 +675,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ThisTest()
+        protected override Task ThisTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -716,7 +705,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UnsafeDoesNotImpactDllImportTest()
+        protected override Task UnsafeDoesNotImpactDllImportTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -726,15 +715,15 @@ namespace ClangSharp.Test
     }
 };
 
-void MyFunction();";
+extern ""C"" void MyFunction();";
 
             var expectedOutputContents = @"using System.Runtime.InteropServices;
 
 namespace ClangSharp.Test
 {
-    public partial struct MyStruct
+    public unsafe partial struct MyStruct
     {
-        public unsafe void* MyVoidStarMethod()
+        public void* MyVoidStarMethod()
         {
             return null;
         }
@@ -751,7 +740,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task VirtualTest()
+        protected override Task VirtualTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -767,13 +756,6 @@ namespace ClangSharp.Test
     virtual void* MyVoidStarMethod() = 0;
 };
 ";
-
-            var callConv = "Cdecl";
-
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && !Environment.Is64BitProcess)
-            {
-                callConv = "Thiscall";
-            }
 
             var expectedOutputContents = $@"using System.Runtime.CompilerServices;
 
@@ -785,23 +767,23 @@ namespace ClangSharp.Test
 
         public void MyVoidMethod()
         {{
-            ((delegate* unmanaged[{callConv}]<MyStruct*, void>)(lpVtbl[0]))((MyStruct*)Unsafe.AsPointer(ref this));
+            ((delegate* unmanaged[Thiscall]<MyStruct*, void>)(lpVtbl[0]))((MyStruct*)Unsafe.AsPointer(ref this));
         }}
 
         [return: NativeTypeName(""char"")]
         public sbyte MyInt8Method()
         {{
-            return ((delegate* unmanaged[{callConv}]<MyStruct*, sbyte>)(lpVtbl[1]))((MyStruct*)Unsafe.AsPointer(ref this));
+            return ((delegate* unmanaged[Thiscall]<MyStruct*, sbyte>)(lpVtbl[1]))((MyStruct*)Unsafe.AsPointer(ref this));
         }}
 
         public int MyInt32Method()
         {{
-            return ((delegate* unmanaged[{callConv}]<MyStruct*, int>)(lpVtbl[2]))((MyStruct*)Unsafe.AsPointer(ref this));
+            return ((delegate* unmanaged[Thiscall]<MyStruct*, int>)(lpVtbl[2]))((MyStruct*)Unsafe.AsPointer(ref this));
         }}
 
         public void* MyVoidStarMethod()
         {{
-            return ((delegate* unmanaged[{callConv}]<MyStruct*, void*>)(lpVtbl[3]))((MyStruct*)Unsafe.AsPointer(ref this));
+            return ((delegate* unmanaged[Thiscall]<MyStruct*, void*>)(lpVtbl[3]))((MyStruct*)Unsafe.AsPointer(ref this));
         }}
     }}
 }}
@@ -810,7 +792,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task VirtualWithVtblIndexAttributeTest()
+        protected override Task VirtualWithVtblIndexAttributeTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -826,13 +808,6 @@ namespace ClangSharp.Test
     virtual void* MyVoidStarMethod() = 0;
 };
 ";
-
-            var callConv = "Cdecl";
-
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && !Environment.Is64BitProcess)
-            {
-                callConv = "Thiscall";
-            }
 
             var expectedOutputContents = $@"using System.Runtime.CompilerServices;
 
@@ -845,26 +820,26 @@ namespace ClangSharp.Test
         [VtblIndex(0)]
         public void MyVoidMethod()
         {{
-            ((delegate* unmanaged[{callConv}]<MyStruct*, void>)(lpVtbl[0]))((MyStruct*)Unsafe.AsPointer(ref this));
+            ((delegate* unmanaged[Thiscall]<MyStruct*, void>)(lpVtbl[0]))((MyStruct*)Unsafe.AsPointer(ref this));
         }}
 
         [VtblIndex(1)]
         [return: NativeTypeName(""char"")]
         public sbyte MyInt8Method()
         {{
-            return ((delegate* unmanaged[{callConv}]<MyStruct*, sbyte>)(lpVtbl[1]))((MyStruct*)Unsafe.AsPointer(ref this));
+            return ((delegate* unmanaged[Thiscall]<MyStruct*, sbyte>)(lpVtbl[1]))((MyStruct*)Unsafe.AsPointer(ref this));
         }}
 
         [VtblIndex(2)]
         public int MyInt32Method()
         {{
-            return ((delegate* unmanaged[{callConv}]<MyStruct*, int>)(lpVtbl[2]))((MyStruct*)Unsafe.AsPointer(ref this));
+            return ((delegate* unmanaged[Thiscall]<MyStruct*, int>)(lpVtbl[2]))((MyStruct*)Unsafe.AsPointer(ref this));
         }}
 
         [VtblIndex(3)]
         public void* MyVoidStarMethod()
         {{
-            return ((delegate* unmanaged[{callConv}]<MyStruct*, void*>)(lpVtbl[3]))((MyStruct*)Unsafe.AsPointer(ref this));
+            return ((delegate* unmanaged[Thiscall]<MyStruct*, void*>)(lpVtbl[3]))((MyStruct*)Unsafe.AsPointer(ref this));
         }}
     }}
 }}

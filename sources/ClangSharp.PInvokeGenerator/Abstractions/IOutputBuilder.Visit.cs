@@ -1,4 +1,6 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System;
 
 namespace ClangSharp.Abstractions
 {
@@ -7,8 +9,8 @@ namespace ClangSharp.Abstractions
         void WriteDivider(bool force = false);
         void SuppressDivider();
 
-        void WriteCustomAttribute(string attribute);
-        void WriteIid(string iidName, string iidValue);
+        void WriteCustomAttribute(string attribute, Action callback = null);
+        void WriteIid(string name, Guid value);
         void EmitUsingDirective(string directive);
     }
 }

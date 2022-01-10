@@ -1,19 +1,18 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.IO;
 using ClangSharp.Interop;
-using Xunit;
+using NUnit.Framework;
 
 namespace ClangSharp.UnitTests
 {
     // This is not ported from libclangtest but instead created to test Unicode stuff
     public class CXTranslationUnitTest
     {
-        [Theory]
-        [InlineData("basic")]
-        [InlineData("example with spaces")]
-        [InlineData("♫")]
+        [TestCase("basic")]
+        [TestCase("example with spaces")]
+        [TestCase("♫")]
         public void Basic(string name)
         {
             // Create a unique directory
@@ -29,7 +28,7 @@ namespace ClangSharp.UnitTests
                 using var index = CXIndex.Create();
                 using var translationUnit = CXTranslationUnit.Parse(index, file.FullName, Array.Empty<string>(), Array.Empty<CXUnsavedFile>(), CXTranslationUnit_Flags.CXTranslationUnit_None);
                 var clangFile = translationUnit.GetFile(file.FullName);
-                Assert.Equal(file.FullName, clangFile.Name.CString);
+                Assert.AreEqual(file.FullName, clangFile.Name.CString);
             }
             finally
             {
@@ -37,10 +36,9 @@ namespace ClangSharp.UnitTests
             }
         }
 
-        [Theory]
-        [InlineData("basic")]
-        [InlineData("example with spaces")]
-        [InlineData("♫")]
+        [TestCase("basic")]
+        [TestCase("example with spaces")]
+        [TestCase("♫")]
         public void BasicWrapper(string name)
         {
             // Create a unique directory
@@ -59,7 +57,7 @@ namespace ClangSharp.UnitTests
                 var clangFileName = clangFile.Name;
                 var clangFileNameString = clangFileName.CString;
 
-                Assert.Equal(file.FullName, clangFileNameString);
+                Assert.AreEqual(file.FullName, clangFileNameString);
             }
             finally
             {

@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Collections.Generic;
 using System.IO;
@@ -10,13 +10,19 @@ namespace ClangSharp.XML
 {
     internal partial class XmlOutputBuilder : IOutputBuilder
     {
-        public XmlOutputBuilder(string name)
+        private readonly PInvokeGeneratorConfiguration _config;
+
+        public XmlOutputBuilder(string name, PInvokeGeneratorConfiguration config)
         {
             Name = name;
+            _config = config;
         }
 
         public string Name { get; }
         public string Extension { get; } = ".xml";
+
+        public bool IsUncheckedContext { get; private set; }
+
         public bool IsTestOutput { get; } = false;
 
         public IEnumerable<string> Contents

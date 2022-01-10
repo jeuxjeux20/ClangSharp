@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 #include "ClangSharp.h"
 #include "CXCursor.h"
@@ -8,12 +8,16 @@
 #include "CXTranslationUnit.h"
 #include "CXType.h"
 
+#ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4146 4244 4267 4291 4624 4996)
+#endif
 
 #include <clang/Basic/SourceManager.h>
 
+#ifdef _MSC_VER
 #pragma warning(pop)
+#endif
 
 using namespace clang;
 using namespace clang::cxcursor;
@@ -61,6 +65,25 @@ bool isStmtOrExpr(CXCursorKind kind) {
     return clang_isStatement(kind) || clang_isExpression(kind);
 }
 
+int64_t getVtblIdx(const GlobalDecl& d)
+{
+    const CXXMethodDecl* CMD = static_cast<const CXXMethodDecl*>(d.getDecl());
+    if (VTableContextBase::hasVtableSlot(CMD)) {
+        VTableContextBase* VTC = CMD->getASTContext().getVTableContext();
+
+        if (MicrosoftVTableContext* MSVTC = dyn_cast<MicrosoftVTableContext>(VTC)) {
+            MethodVFTableLocation ML = MSVTC->getMethodVFTableLocation(d);
+            return ML.Index;
+        }
+
+        if (ItaniumVTableContext* IVTC = dyn_cast<ItaniumVTableContext>(VTC)) {
+            return IVTC->getMethodVTableIndex(d);
+        }
+    }
+
+    return -1;
+}
+
 CXCursor clangsharp_Cursor_getArgument(CXCursor C, unsigned i) {
     if (isDeclOrTU(C.kind)) {
         const Decl* D = getCursorDecl(C);
@@ -101,7 +124,7 @@ CXCursor clangsharp_Cursor_getArgument(CXCursor C, unsigned i) {
         }
 
         if (const CXXUnresolvedConstructExpr* CXXUCE = dyn_cast<CXXUnresolvedConstructExpr>(S)) {
-            if (i < CXXUCE->arg_size()) {
+            if (i < CXXUCE->getNumArgs()) {
                 return MakeCXCursor(CXXUCE->getArg(i), getCursorDecl(C), getCursorTU(C));
             }
         }
@@ -1009,29 +1032,26 @@ CXType clangsharp_Cursor_getDefaultArgType(CXCursor C) {
 CXCursor clangsharp_Cursor_getDefinition(CXCursor C) {
     if (isDeclOrTU(C.kind)) {
         const Decl* D = getCursorDecl(C);
+        const Decl* DD = nullptr;
 
         if (const FunctionDecl* FD = dyn_cast<FunctionDecl>(D)) {
-            return MakeCXCursor(FD->getDefinition(), getCursorTU(C));
+            DD = FD->getDefinition();
+        } else if (const ObjCInterfaceDecl* OCID = dyn_cast<ObjCInterfaceDecl>(D)) {
+            DD = OCID->getDefinition();
+        } else if (const ObjCProtocolDecl* OCPD = dyn_cast<ObjCProtocolDecl>(D)) {
+            DD = OCPD->getDefinition();
+        } else if (const TagDecl* TD = dyn_cast<TagDecl>(D)) {
+            DD = TD->getDefinition();
+        } else if (const VarDecl* VD = dyn_cast<VarDecl>(D)) {
+            DD = VD->getDefinition();
+        } else {
+            return clang_getCursorDefinition(C);
         }
 
-        if (const ObjCInterfaceDecl* OCID = dyn_cast<ObjCInterfaceDecl>(D)) {
-            return MakeCXCursor(OCID->getDefinition(), getCursorTU(C));
-        }
-
-        if (const ObjCProtocolDecl* OCPD = dyn_cast<ObjCProtocolDecl>(D)) {
-            return MakeCXCursor(OCPD->getDefinition(), getCursorTU(C));
-        }
-
-        if (const TagDecl* TD = dyn_cast<TagDecl>(D)) {
-            return MakeCXCursor(TD->getDefinition(), getCursorTU(C));
-        }
-
-        if (const VarDecl* VD = dyn_cast<VarDecl>(D)) {
-            return MakeCXCursor(VD->getDefinition(), getCursorTU(C));
-        }
+        return DD ? MakeCXCursor(DD, getCursorTU(C)) : clang_getNullCursor();
+    } else {
+        return clang_getCursorDefinition(C);
     }
-
-    return clang_getCursorDefinition(C);
 }
 
 CXCursor clangsharp_Cursor_getDependentLambdaCallOperator(CXCursor C) {
@@ -1484,30 +1504,6 @@ unsigned clangsharp_Cursor_getHasExplicitTemplateArgs(CXCursor C) {
 
         if (const OverloadExpr* OE = dyn_cast<OverloadExpr>(S)) {
             return OE->hasExplicitTemplateArgs();
-        }
-    }
-
-    return 0;
-}
-
-unsigned clangsharp_Cursor_getHasExternalStorage(CXCursor C) {
-    if (isDeclOrTU(C.kind)) {
-        const Decl* D = getCursorDecl(C);
-
-        if (const VarDecl* VD = dyn_cast<VarDecl>(D)) {
-            return VD->hasExternalStorage();
-        }
-    }
-
-    return 0;
-}
-
-unsigned clangsharp_Cursor_getHasGlobalStorage(CXCursor C) {
-    if (isDeclOrTU(C.kind)) {
-        const Decl* D = getCursorDecl(C);
-
-        if (const VarDecl* VD = dyn_cast<VarDecl>(D)) {
-            return VD->hasGlobalStorage();
         }
     }
 
@@ -3016,7 +3012,7 @@ int clangsharp_Cursor_getNumArguments(CXCursor C) {
         }
 
         if (const CXXUnresolvedConstructExpr* CXXUCE = dyn_cast<CXXUnresolvedConstructExpr>(S)) {
-            return CXXUCE->arg_size();
+            return CXXUCE->getNumArgs();
         }
 
         if (const ExprWithCleanups* EWC = dyn_cast<ExprWithCleanups>(S)) {
@@ -3922,7 +3918,7 @@ CXString clangsharp_Cursor_getStringLiteralValue(CXCursor C) {
         const Stmt* S = getCursorStmt(C);
 
         if (const StringLiteral* SL = dyn_cast<StringLiteral>(S)) {
-            return createDup(SL->getString());
+            return createDup(SL->getBytes());
         }
     }
 
@@ -4717,27 +4713,38 @@ CXCursor clangsharp_Cursor_getVBase(CXCursor C, unsigned i) {
     return clang_getNullCursor();
 }
 
+int64_t clangsharp_Cursor_getDtorVtblIdx(CXCursor C, CX_DestructorType dtor)
+{
+    if (isDeclOrTU(C.kind)) {
+        const Decl* D = getCursorDecl(C);
+
+        if (const CXXDestructorDecl* CMD = dyn_cast<CXXDestructorDecl>(D)) {
+            return getVtblIdx(GlobalDecl(CMD, static_cast<CXXDtorType>(dtor)));
+        }
+    }
+    return -1;
+}
+
 int64_t clangsharp_Cursor_getVtblIdx(CXCursor C) {
     if (isDeclOrTU(C.kind)) {
         const Decl* D = getCursorDecl(C);
 
         if (const CXXMethodDecl* CMD = dyn_cast<CXXMethodDecl>(D)) {
-            if (VTableContextBase::hasVtableSlot(CMD)) {
-                VTableContextBase* VTC = getASTUnit(getCursorTU(C))->getASTContext().getVTableContext();
-
-                if (MicrosoftVTableContext* MSVTC = dyn_cast<MicrosoftVTableContext>(VTC)) {
-                    MethodVFTableLocation ML = MSVTC->getMethodVFTableLocation(CMD);
-                    return ML.Index;
-                }
-
-                if (ItaniumVTableContext* IVTC = dyn_cast<ItaniumVTableContext>(VTC)) {
-                    return IVTC->getMethodVTableIndex(CMD);
-                }
+            int64_t dtorIdx = clangsharp_Cursor_getDtorVtblIdx(C, Deleting); // will test if CMD is a dtor
+            if (dtorIdx != -1) { // yes, it is a dtor
+                return dtorIdx;
             }
+
+            // no, it is a regular method
+            return getVtblIdx(CMD);
         }
     }
 
     return -1;
+}
+
+CXString clangsharp_getVersion() {
+    return cxstring::createDup("clangsharp version 13.0.0");
 }
 
 void clangsharp_TemplateArgument_dispose(CX_TemplateArgument T) {

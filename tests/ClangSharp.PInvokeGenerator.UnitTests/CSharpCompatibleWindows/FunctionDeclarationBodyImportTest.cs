@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.Runtime.InteropServices;
@@ -8,7 +8,7 @@ namespace ClangSharp.UnitTests
 {
     public sealed class CSharpCompatibleWindows_FunctionDeclarationBodyImportTest : FunctionDeclarationBodyImportTest
     {
-        public override Task ArraySubscriptTest()
+        protected override Task ArraySubscriptTestImpl()
         {
             var inputContents = @"int MyFunction(int* pData, int index)
 {
@@ -31,7 +31,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task BasicTest()
+        protected override Task BasicTestImpl()
         {
             var inputContents = @"void MyFunction()
 {
@@ -52,7 +52,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task BinaryOperatorBasicTest(string opcode)
+        protected override Task BinaryOperatorBasicTestImpl(string opcode)
         {
             var inputContents = $@"int MyFunction(int x, int y)
 {{
@@ -75,7 +75,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task BinaryOperatorCompareTest(string opcode)
+        protected override Task BinaryOperatorCompareTestImpl(string opcode)
         {
             var inputContents = $@"bool MyFunction(int x, int y)
 {{
@@ -98,7 +98,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task BinaryOperatorBooleanTest(string opcode)
+        protected override Task BinaryOperatorBooleanTestImpl(string opcode)
         {
             var inputContents = $@"bool MyFunction(bool x, bool y)
 {{
@@ -121,7 +121,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task BreakTest()
+        protected override Task BreakTestImpl()
         {
             var inputContents = @"int MyFunction(int value)
 {
@@ -154,7 +154,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task CallFunctionTest()
+        protected override Task CallFunctionTestImpl()
         {
             var inputContents = @"void MyCalledFunction()
 {
@@ -185,7 +185,7 @@ void MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task CallFunctionWithArgsTest()
+        protected override Task CallFunctionWithArgsTestImpl()
         {
             var inputContents = @"void MyCalledFunction(int x, int y)
 {
@@ -216,7 +216,7 @@ void MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task CaseTest()
+        protected override Task CaseTestImpl()
         {
             var inputContents = @"int MyFunction(int value)
 {
@@ -267,7 +267,7 @@ void MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task CaseNoCompoundTest()
+        protected override Task CaseNoCompoundTestImpl()
         {
             var inputContents = @"int MyFunction(int value)
 {
@@ -314,7 +314,7 @@ void MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task CompareMultipleEnumTest()
+        protected override Task CompareMultipleEnumTestImpl()
         {
             var inputContents = @"enum MyEnum : int
 {
@@ -355,7 +355,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ConditionalOperatorTest()
+        protected override Task ConditionalOperatorTestImpl()
         {
             var inputContents = @"int MyFunction(bool condition, int lhs, int rhs)
 {
@@ -378,7 +378,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ContinueTest()
+        protected override Task ContinueTestImpl()
         {
             var inputContents = @"int MyFunction(int value)
 {
@@ -411,7 +411,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task CStyleFunctionalCastTest()
+        protected override Task CStyleFunctionalCastTestImpl()
         {
             var inputContents = @"int MyFunction(float input)
 {
@@ -434,7 +434,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task CxxFunctionalCastTest()
+        protected override Task CxxFunctionalCastTestImpl()
         {
             var inputContents = @"int MyFunction(float input)
 {
@@ -457,7 +457,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task CxxConstCastTest()
+        protected override Task CxxConstCastTestImpl()
         {
             var inputContents = @"void* MyFunction(const void* input)
 {
@@ -480,7 +480,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task CxxDynamicCastTest()
+        protected override Task CxxDynamicCastTestImpl()
         {
             var inputContents = @"struct MyStructA
 {
@@ -495,13 +495,6 @@ MyStructB* MyFunction(MyStructA* input)
 }
 ";
 
-            var callConv = "Cdecl";
-
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && !Environment.Is64BitProcess)
-            {
-                callConv = "ThisCall";
-            }
-
             var expectedOutputContents = $@"using System;
 using System.Runtime.InteropServices;
 
@@ -511,7 +504,7 @@ namespace ClangSharp.Test
     {{
         public void** lpVtbl;
 
-        [UnmanagedFunctionPointer(CallingConvention.{callConv})]
+        [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
         public delegate void _MyMethod(MyStructA* pThis);
 
         public void MyMethod()
@@ -528,7 +521,7 @@ namespace ClangSharp.Test
     {{
         public void** lpVtbl;
 
-        [UnmanagedFunctionPointer(CallingConvention.{callConv})]
+        [UnmanagedFunctionPointer(CallingConvention.ThisCall)]
         public delegate void _MyMethod(MyStructB* pThis);
 
         public void MyMethod()
@@ -553,7 +546,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task CxxReinterpretCastTest()
+        protected override Task CxxReinterpretCastTestImpl()
         {
             var inputContents = @"int* MyFunction(void* input)
 {
@@ -576,7 +569,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task CxxStaticCastTest()
+        protected override Task CxxStaticCastTestImpl()
         {
             var inputContents = @"int* MyFunction(void* input)
 {
@@ -599,7 +592,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task DeclTest()
+        protected override Task DeclTestImpl()
         {
             var inputContents = @"\
 int MyFunction()
@@ -628,7 +621,7 @@ int MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task DoTest()
+        protected override Task DoTestImpl()
         {
             var inputContents = @"int MyFunction(int count)
 {
@@ -667,7 +660,7 @@ int MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task DoNonCompoundTest()
+        protected override Task DoNonCompoundTestImpl()
         {
             var inputContents = @"int MyFunction(int count)
 {
@@ -702,7 +695,7 @@ int MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ForTest()
+        protected override Task ForTestImpl()
         {
             var inputContents = @"int MyFunction(int count)
 {
@@ -848,7 +841,7 @@ int MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ForNonCompoundTest()
+        protected override Task ForNonCompoundTestImpl()
         {
             var inputContents = @"int MyFunction(int count)
 {
@@ -970,7 +963,7 @@ int MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task IfTest()
+        protected override Task IfTestImpl()
         {
             var inputContents = @"int MyFunction(bool condition, int lhs, int rhs)
 {
@@ -1003,7 +996,7 @@ int MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task IfElseTest()
+        protected override Task IfElseTestImpl()
         {
             var inputContents = @"int MyFunction(bool condition, int lhs, int rhs)
 {
@@ -1040,7 +1033,7 @@ int MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task IfElseIfTest()
+        protected override Task IfElseIfTestImpl()
         {
             var inputContents = @"int MyFunction(bool condition1, int a, int b, bool condition2, int c)
 {
@@ -1081,7 +1074,7 @@ int MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task IfElseNonCompoundTest()
+        protected override Task IfElseNonCompoundTestImpl()
         {
             var inputContents = @"int MyFunction(bool condition, int lhs, int rhs)
 {
@@ -1114,7 +1107,7 @@ int MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task InitListForArrayTest()
+        protected override Task InitListForArrayTestImpl()
         {
             var inputContents = @"
 void MyFunction()
@@ -1158,7 +1151,7 @@ void MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task InitListForRecordDeclTest()
+        protected override Task InitListForRecordDeclTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -1221,7 +1214,7 @@ MyStruct MyFunction2()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task MemberTest()
+        protected override Task MemberTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -1264,7 +1257,7 @@ int MyFunction2(MyStruct* instance)
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task RefToPtrTest()
+        protected override Task RefToPtrTestImpl()
         {
             var inputContents = @"struct MyStruct {
     int value;
@@ -1296,7 +1289,7 @@ bool MyFunction(const MyStruct& lhs, const MyStruct& rhs)
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ReturnCXXNullPtrTest()
+        protected override Task ReturnCXXNullPtrTestImpl()
         {
             var inputContents = @"void* MyFunction()
 {
@@ -1319,7 +1312,7 @@ bool MyFunction(const MyStruct& lhs, const MyStruct& rhs)
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ReturnCXXBooleanLiteralTest(string value)
+        protected override Task ReturnCXXBooleanLiteralTestImpl(string value)
         {
             var inputContents = $@"bool MyFunction()
 {{
@@ -1342,7 +1335,7 @@ bool MyFunction(const MyStruct& lhs, const MyStruct& rhs)
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ReturnFloatingLiteralDoubleTest(string value)
+        protected override Task ReturnFloatingLiteralDoubleTestImpl(string value)
         {
             var inputContents = $@"double MyFunction()
 {{
@@ -1365,7 +1358,7 @@ bool MyFunction(const MyStruct& lhs, const MyStruct& rhs)
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ReturnFloatingLiteralSingleTest(string value)
+        protected override Task ReturnFloatingLiteralSingleTestImpl(string value)
         {
             var inputContents = $@"float MyFunction()
 {{
@@ -1388,7 +1381,7 @@ bool MyFunction(const MyStruct& lhs, const MyStruct& rhs)
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ReturnEmptyTest()
+        protected override Task ReturnEmptyTestImpl()
         {
             var inputContents = @"void MyFunction()
 {
@@ -1411,7 +1404,7 @@ bool MyFunction(const MyStruct& lhs, const MyStruct& rhs)
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ReturnIntegerLiteralInt32Test()
+        protected override Task ReturnIntegerLiteralInt32TestImpl()
         {
             var inputContents = @"int MyFunction()
 {
@@ -1434,7 +1427,7 @@ bool MyFunction(const MyStruct& lhs, const MyStruct& rhs)
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task AccessUnionMemberTest()
+        protected override Task AccessUnionMemberTestImpl()
         {
             var inputContents = @"union MyUnion
 {
@@ -1491,7 +1484,7 @@ namespace ClangSharp.Test
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ReturnStructTest()
+        protected override Task ReturnStructTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -1533,7 +1526,7 @@ MyStruct MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task SwitchTest()
+        protected override Task SwitchTestImpl()
         {
             var inputContents = @"int MyFunction(int value)
 {
@@ -1568,7 +1561,7 @@ MyStruct MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task SwitchNonCompoundTest()
+        protected override Task SwitchNonCompoundTestImpl()
         {
             var inputContents = @"int MyFunction(int value)
 {
@@ -1613,7 +1606,7 @@ MyStruct MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UnaryOperatorAddrOfTest()
+        protected override Task UnaryOperatorAddrOfTestImpl()
         {
             var inputContents = @"int* MyFunction(int value)
 {
@@ -1636,7 +1629,7 @@ MyStruct MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UnaryOperatorDerefTest()
+        protected override Task UnaryOperatorDerefTestImpl()
         {
             var inputContents = @"int MyFunction(int* value)
 {
@@ -1659,7 +1652,7 @@ MyStruct MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UnaryOperatorLogicalNotTest()
+        protected override Task UnaryOperatorLogicalNotTestImpl()
         {
             var inputContents = @"bool MyFunction(bool value)
 {
@@ -1682,7 +1675,7 @@ MyStruct MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UnaryOperatorPostfixTest(string opcode)
+        protected override Task UnaryOperatorPostfixTestImpl(string opcode)
         {
             var inputContents = $@"int MyFunction(int value)
 {{
@@ -1705,7 +1698,7 @@ MyStruct MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UnaryOperatorPrefixTest(string opcode)
+        protected override Task UnaryOperatorPrefixTestImpl(string opcode)
         {
             var inputContents = $@"int MyFunction(int value)
 {{
@@ -1728,7 +1721,7 @@ MyStruct MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task WhileTest()
+        protected override Task WhileTestImpl()
         {
             var inputContents = @"int MyFunction(int count)
 {
@@ -1765,7 +1758,7 @@ MyStruct MyFunction()
             return ValidateGeneratedCSharpCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task WhileNonCompoundTest()
+        protected override Task WhileNonCompoundTestImpl()
         {
             var inputContents = @"int MyFunction(int count)
 {

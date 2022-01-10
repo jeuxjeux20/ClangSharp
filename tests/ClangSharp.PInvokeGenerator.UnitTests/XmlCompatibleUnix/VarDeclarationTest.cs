@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -7,7 +7,7 @@ namespace ClangSharp.UnitTests
 {
     public sealed class XmlCompatibleUnix_VarDeclarationTest : VarDeclarationTest
     {
-        public override Task BasicTest(string nativeType, string expectedManagedType)
+        protected override Task BasicTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"{nativeType} MyVariable = 0;";
 
@@ -16,7 +16,7 @@ namespace ClangSharp.UnitTests
   <namespace name=""ClangSharp.Test"">
     <class name=""Methods"" access=""public"" static=""true"">
       <constant name=""MyVariable"" access=""public"">
-        <type primitive=""False"">{expectedManagedType}</type>
+        <type primitive=""True"">{expectedManagedType}</type>
         <value>
           <code>0</code>
         </value>
@@ -29,7 +29,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task BasicWithNativeTypeNameTest(string nativeType, string expectedManagedType)
+        protected override Task BasicWithNativeTypeNameTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"{nativeType} MyVariable = 0;";
 
@@ -38,7 +38,7 @@ namespace ClangSharp.UnitTests
   <namespace name=""ClangSharp.Test"">
     <class name=""Methods"" access=""public"" static=""true"">
       <constant name=""MyVariable"" access=""public"">
-        <type primitive=""False"">{expectedManagedType}</type>
+        <type primitive=""True"">{expectedManagedType}</type>
         <value>
           <code>0</code>
         </value>
@@ -51,7 +51,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task GuidMacroTest()
+        protected override Task GuidMacroTestImpl()
         {
             var inputContents = $@"struct GUID {{
     unsigned long  Data1;
@@ -83,7 +83,7 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
             return ValidateGeneratedXmlCompatibleUnixBindingsAsync(inputContents, expectedOutputContents, excludedNames: excludedNames, remappedNames: remappedNames);
         }
 
-        public override Task MacroTest(string nativeValue, string expectedManagedType, string expectedManagedValue)
+        protected override Task MacroTestImpl(string nativeValue, string expectedManagedType, string expectedManagedValue)
         {
             var inputContents = $@"#define MyMacro1 {nativeValue}
 #define MyMacro2 MyMacro1";
@@ -112,7 +112,7 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
             return ValidateGeneratedXmlCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task MultilineMacroTest()
+        protected override Task MultilineMacroTestImpl()
         {
             var inputContents = $@"#define MyMacro1 0 + \
 1";
@@ -135,14 +135,14 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
             return ValidateGeneratedXmlCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task NoInitializerTest(string nativeType)
+        protected override Task NoInitializerTestImpl(string nativeType)
         {
             var inputContents = $@"{nativeType} MyVariable;";
             var expectedOutputContents = "";
             return ValidateGeneratedXmlCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task Utf8StringLiteralMacroTest()
+        protected override Task Utf8StringLiteralMacroTestImpl()
         {
             var inputContents = $@"#define MyMacro1 ""Test""";
 
@@ -164,7 +164,7 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
             return ValidateGeneratedXmlCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task Utf16StringLiteralMacroTest()
+        protected override Task Utf16StringLiteralMacroTestImpl()
         {
             var inputContents = $@"#define MyMacro1 u""Test""";
 
@@ -186,11 +186,11 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
             return ValidateGeneratedXmlCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task WideStringLiteralConstTest() =>
+        protected override Task WideStringLiteralConstTestImpl() =>
             // Unsupported string literal kind: 'CX_CLK_Wide'
             Task.CompletedTask;
 
-        public override Task StringLiteralConstTest()
+        protected override Task StringLiteralConstTestImpl()
         {
             var inputContents = $@"const char MyConst1[] = ""Test"";";
 
@@ -212,7 +212,7 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
             return ValidateGeneratedXmlCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UncheckedConversionMacroTest()
+        protected override Task UncheckedConversionMacroTestImpl()
         {
             var inputContents = $@"#define MyMacro1 (long)0x80000000L
 #define MyMacro2 (int)0x80000000";
@@ -224,7 +224,11 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
       <constant name=""MyMacro1"" access=""public"">
         <type primitive=""True"">IntPtr</type>
         <value>
-          <code>(IntPtr)(<value>0x80000000</value>)</code>
+          <unchecked>
+            <value>
+              <code>(nint)(<value>0x80000000</value>)</code>
+            </value>
+          </unchecked>
         </value>
       </constant>
       <constant name=""MyMacro2"" access=""public"">
@@ -245,7 +249,7 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
             return ValidateGeneratedXmlCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UncheckedFunctionLikeCastMacroTest()
+        protected override Task UncheckedFunctionLikeCastMacroTestImpl()
         {
             var inputContents = $@"#define MyMacro1 unsigned(-1)";
 
@@ -271,7 +275,7 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
             return ValidateGeneratedXmlCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UncheckedConversionMacroTest2()
+        protected override Task UncheckedConversionMacroTest2Impl()
         {
             var inputContents = $@"#define MyMacro1(x, y, z) ((int)(((unsigned long)(x)<<31) | ((unsigned long)(y)<<16) | ((unsigned long)(z))))
 #define MyMacro2(n) MyMacro1(1, 2, n)
@@ -285,7 +289,7 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
         <type primitive=""True"">int</type>
         <value>
           <unchecked>
-            <code>((int)(((UIntPtr)(1) &lt;&lt; 31) | ((UIntPtr)(2) &lt;&lt; 16) | ((UIntPtr)(3))))</code>
+            <code>((int)(((nuint)(1) &lt;&lt; 31) | ((nuint)(2) &lt;&lt; 16) | ((nuint)(3))))</code>
           </unchecked>
         </value>
       </constant>
@@ -298,7 +302,7 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
             return ValidateGeneratedXmlCompatibleUnixBindingsAsync(inputContents, expectedOutputContents, excludedNames: excludedNames);
         }
 
-        public override Task UncheckedPointerMacroTest()
+        protected override Task UncheckedPointerMacroTestImpl()
         {
             var inputContents = $@"#define Macro1 ((int*) -1)";
 
@@ -307,7 +311,7 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
   <namespace name=""ClangSharp.Test"">
     <class name=""Methods"" access=""public"" static=""true"" unsafe=""true"">
       <constant name=""Macro1"" access=""public"">
-        <type primitive=""False"">int*</type>
+        <type primitive=""True"">int*</type>
         <value>
           <unchecked>
             <code>((int*)(<value>-1</value>))</code>
@@ -322,7 +326,7 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
             return ValidateGeneratedXmlCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UncheckedReinterpretCastMacroTest()
+        protected override Task UncheckedReinterpretCastMacroTestImpl()
         {
             var inputContents = $@"#define Macro1 reinterpret_cast<int*>(-1)";
 
@@ -331,7 +335,7 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
   <namespace name=""ClangSharp.Test"">
     <class name=""Methods"" access=""public"" static=""true"" unsafe=""true"">
       <constant name=""Macro1"" access=""public"">
-        <type primitive=""False"">int*</type>
+        <type primitive=""True"">int*</type>
         <value>
           <unchecked>
             <value>
@@ -348,7 +352,7 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
             return ValidateGeneratedXmlCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task MultidimensionlArrayTest()
+        protected override Task MultidimensionlArrayTestImpl()
         {
             var inputContents = $@"const int MyArray[2][2] = {{ {{ 0, 1 }}, {{ 2, 3 }} }};";
 
@@ -382,7 +386,7 @@ const GUID IID_IUnknown = {{ 0x00000000, 0x0000, 0x0000, {{ 0xC0, 0x00, 0x00, 0x
             return ValidateGeneratedXmlCompatibleUnixBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ConditionalDefineConstTest()
+        protected override Task ConditionalDefineConstTestImpl()
         {
             var inputContents = @"typedef int TESTRESULT;
 #define TESTRESULT_FROM_WIN32(x) ((TESTRESULT)(x) <= 0 ? ((TESTRESULT)(x)) : ((TESTRESULT) (((x) & 0x0000FFFF) | (7 << 16) | 0x80000000)))

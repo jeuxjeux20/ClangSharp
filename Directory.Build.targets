@@ -16,12 +16,12 @@
   </PropertyGroup>
 
   <!-- Settings that are only set for CI builds -->
-  <PropertyGroup Condition="'$(BUILD_BUILDNUMBER)' != ''">
-    <PackageVersion Condition="'$(EXCLUDE_BUILDNUMBER_FROM_PACKAGE)' == ''">$(Version)-$(BUILD_BUILDNUMBER)</PackageVersion>
+  <PropertyGroup Condition="'$(GITHUB_RUN_ID)' != ''">
+    <PackageVersion Condition="'$(EXCLUDE_RUN_ID_FROM_PACKAGE)' != 'true'">$(Version).$(GITHUB_RUN_ID)</PackageVersion>
   </PropertyGroup>
 
   <!-- Settings that allow testing and packing to work by default -->
-  <PropertyGroup Condition="'$(RuntimeIdentifier)' == '' AND '$(Contin)' != 'true'">
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == ''">
     <RuntimeIdentifier>$(NETCoreSdkRuntimeIdentifier)</RuntimeIdentifier>
     <RuntimeIdentifier Condition="'$(OVERRIDE_RUNTIME_IDENTIFIER)' != ''">$(OVERRIDE_RUNTIME_IDENTIFIER)</RuntimeIdentifier>
   </PropertyGroup>
@@ -33,15 +33,15 @@
 
   <!-- Package versions for package references across all projects -->
   <ItemGroup>
-    <PackageReference Update="libClang" Version="11.0.0" />
-    <PackageReference Update="libClangSharp" Version="11.0.0-beta2" />
+    <PackageReference Update="libClang" Version="13.0.1" />
+    <PackageReference Update="libClangSharp" Version="13.0.0-beta1" />
     <PackageReference Update="Microsoft.Bcl.HashCode" Version="1.1.1" />
-    <PackageReference Update="Microsoft.NET.Test.Sdk" Version="16.8.3" />
-    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="1.0.0" />
-    <PackageReference Update="System.CommandLine" Version="2.0.0-beta1.20574.7" />
+    <PackageReference Update="Microsoft.NET.Test.Sdk" Version="17.0.0" />
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="1.1.1" />
+    <PackageReference Update="NUnit" Version="3.13.2" />
+    <PackageReference Update="NUnit3TestAdapter" Version="4.0.0" />
+    <PackageReference Update="System.CommandLine" Version="2.0.0-beta1.21308.1" />
     <PackageReference Update="System.Memory" Version="4.5.4" />
-    <PackageReference Update="xunit" Version="2.4.1" />
-    <PackageReference Update="xunit.runner.visualstudio" Version="2.4.3" />
   </ItemGroup>
 
 </Project>

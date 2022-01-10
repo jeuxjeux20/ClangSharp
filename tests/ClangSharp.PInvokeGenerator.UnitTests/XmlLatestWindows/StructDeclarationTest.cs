@@ -1,15 +1,16 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using ClangSharp.Abstractions;
 
 namespace ClangSharp.UnitTests
 {
     public sealed class XmlLatestWindows_StructDeclarationTest : StructDeclarationTest
     {
-        public override Task BasicTest(string nativeType, string expectedManagedType)
+        protected override Task BasicTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"struct MyStruct
 {{
@@ -40,7 +41,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task BasicTestInCMode(string nativeType, string expectedManagedType)
+        protected override Task BasicTestInCModeImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"typedef struct
 {{
@@ -70,7 +71,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents, commandlineArgs: Array.Empty<string>());
         }
 
-        public override Task BasicWithNativeTypeNameTest(string nativeType, string expectedManagedType)
+        protected override Task BasicWithNativeTypeNameTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"struct MyStruct
 {{
@@ -101,7 +102,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task BitfieldTest()
+        protected override Task BitfieldTestImpl()
         {
             var inputContents = @"struct MyStruct1
 {
@@ -278,7 +279,7 @@ struct MyStruct3
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ExcludeTest()
+        protected override Task ExcludeTestImpl()
         {
             var inputContents = "typedef struct MyStruct MyStruct;";
             var expectedOutputContents = string.Empty;
@@ -287,7 +288,7 @@ struct MyStruct3
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents, excludedNames: excludedNames);
         }
 
-        public override Task FixedSizedBufferNonPrimitiveTest(string nativeType, string expectedManagedType)
+        protected override Task FixedSizedBufferNonPrimitiveTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"struct MyStruct
 {{
@@ -344,7 +345,7 @@ struct MyOtherStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task FixedSizedBufferNonPrimitiveMultidimensionalTest(string nativeType, string expectedManagedType)
+        protected override Task FixedSizedBufferNonPrimitiveMultidimensionalTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"struct MyStruct
 {{
@@ -464,7 +465,7 @@ struct MyOtherStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task FixedSizedBufferNonPrimitiveTypedefTest(string nativeType, string expectedManagedType)
+        protected override Task FixedSizedBufferNonPrimitiveTypedefTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"struct MyStruct
 {{
@@ -523,7 +524,7 @@ struct MyOtherStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task FixedSizedBufferNonPrimitiveWithNativeTypeNameTest(string nativeType, string expectedManagedType)
+        protected override Task FixedSizedBufferNonPrimitiveWithNativeTypeNameTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"struct MyStruct
 {{
@@ -580,7 +581,7 @@ struct MyOtherStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task FixedSizedBufferPointerTest(string nativeType, string expectedManagedType)
+        protected override Task FixedSizedBufferPointerTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"struct MyStruct
 {{
@@ -626,7 +627,7 @@ struct MyOtherStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task FixedSizedBufferPrimitiveTest(string nativeType, string expectedManagedType)
+        protected override Task FixedSizedBufferPrimitiveTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"struct MyStruct
 {{
@@ -649,7 +650,7 @@ struct MyOtherStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task FixedSizedBufferPrimitiveMultidimensionalTest(string nativeType, string expectedManagedType)
+        protected override Task FixedSizedBufferPrimitiveMultidimensionalTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"struct MyStruct
 {{
@@ -672,7 +673,7 @@ struct MyOtherStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task FixedSizedBufferPrimitiveTypedefTest(string nativeType, string expectedManagedType)
+        protected override Task FixedSizedBufferPrimitiveTypedefTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"typedef {nativeType} MyBuffer[3];
 
@@ -697,7 +698,7 @@ struct MyStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task GuidTest()
+        protected override Task GuidTestImpl()
         {
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
@@ -743,7 +744,7 @@ struct DECLSPEC_UUID(""00000000-0000-0000-C000-000000000047"") MyStruct2
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents, excludedNames: excludedNames);
         }
 
-        public override Task InheritanceTest()
+        protected override Task InheritanceTestImpl()
         {
             var inputContents = @"struct MyStruct1A
 {
@@ -784,10 +785,10 @@ struct MyStruct2 : MyStruct1A, MyStruct1B
       </field>
     </struct>
     <struct name=""MyStruct2"" access=""public"" native=""struct MyStruct2 : MyStruct1A, MyStruct1B"">
-      <field name=""__AnonymousBase_ClangUnsavedFile_L13_C20"" access=""public"" inherited=""MyStruct1A"">
+      <field name=""Base"" access=""public"" inherited=""MyStruct1A"">
         <type>MyStruct1A</type>
       </field>
-      <field name=""__AnonymousBase_ClangUnsavedFile_L13_C32"" access=""public"" inherited=""MyStruct1B"">
+      <field name=""Base"" access=""public"" inherited=""MyStruct1B"">
         <type>MyStruct1B</type>
       </field>
       <field name=""z"" access=""public"">
@@ -804,7 +805,7 @@ struct MyStruct2 : MyStruct1A, MyStruct1B
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task InheritanceWithNativeInheritanceAttributeTest()
+        protected override Task InheritanceWithNativeInheritanceAttributeTestImpl()
         {
             var inputContents = @"struct MyStruct1A
 {
@@ -845,10 +846,10 @@ struct MyStruct2 : MyStruct1A, MyStruct1B
       </field>
     </struct>
     <struct name=""MyStruct2"" access=""public"" native=""struct MyStruct2 : MyStruct1A, MyStruct1B"" parent=""MyStruct1B"">
-      <field name=""__AnonymousBase_ClangUnsavedFile_L13_C20"" access=""public"" inherited=""MyStruct1A"">
+      <field name=""Base"" access=""public"" inherited=""MyStruct1A"">
         <type>MyStruct1A</type>
       </field>
-      <field name=""__AnonymousBase_ClangUnsavedFile_L13_C32"" access=""public"" inherited=""MyStruct1B"">
+      <field name=""Base"" access=""public"" inherited=""MyStruct1B"">
         <type>MyStruct1B</type>
       </field>
       <field name=""z"" access=""public"">
@@ -865,7 +866,7 @@ struct MyStruct2 : MyStruct1A, MyStruct1B
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents, PInvokeGeneratorConfigurationOptions.GenerateNativeInheritanceAttribute);
         }
 
-        public override Task NestedAnonymousTest(string nativeType, string expectedManagedType, int line, int column)
+        protected override Task NestedAnonymousTestImpl(string nativeType, string expectedManagedType, int line, int column)
         {
             var inputContents = $@"typedef union {{
     {nativeType} value;
@@ -997,7 +998,7 @@ struct MyStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task NestedAnonymousWithBitfieldTest()
+        protected override Task NestedAnonymousWithBitfieldTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -1105,7 +1106,7 @@ struct MyStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task NestedTest(string nativeType, string expectedManagedType)
+        protected override Task NestedTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"struct MyStruct
 {{
@@ -1158,7 +1159,7 @@ struct MyStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task NestedWithNativeTypeNameTest(string nativeType, string expectedManagedType)
+        protected override Task NestedWithNativeTypeNameTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"struct MyStruct
 {{
@@ -1211,7 +1212,7 @@ struct MyStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task NewKeywordTest()
+        protected override Task NewKeywordTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -1257,7 +1258,7 @@ struct MyStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task NoDefinitionTest()
+        protected override Task NoDefinitionTestImpl()
         {
             var inputContents = "typedef struct MyStruct MyStruct;";
 
@@ -1270,8 +1271,62 @@ struct MyStruct
 ";
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
+        protected override Task PackTestImpl()
+        {
+            const string InputContents = @"struct MyStruct1 {
+    unsigned Field1;
 
-        public override Task PointerToSelfTest()
+    void* Field2;
+
+    unsigned Field3;
+};
+
+#pragma pack(4)
+
+struct MyStruct2 {
+    unsigned Field1;
+
+    void* Field2;
+
+    unsigned Field3;
+};
+";
+
+            var packing = Environment.Is64BitProcess ? " layout=\"Sequential\" pack=\"4\"" : string.Empty;
+
+            var expectedOutputContents = $@"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes"" ?>
+<bindings>
+  <namespace name=""ClangSharp.Test"">
+    <struct name=""MyStruct1"" access=""public"" unsafe=""true"">
+      <field name=""Field1"" access=""public"">
+        <type native=""unsigned int"">uint</type>
+      </field>
+      <field name=""Field2"" access=""public"">
+        <type>void*</type>
+      </field>
+      <field name=""Field3"" access=""public"">
+        <type native=""unsigned int"">uint</type>
+      </field>
+    </struct>
+    <struct name=""MyStruct2"" access=""public"" unsafe=""true""{packing}>
+      <field name=""Field1"" access=""public"">
+        <type native=""unsigned int"">uint</type>
+      </field>
+      <field name=""Field2"" access=""public"">
+        <type>void*</type>
+      </field>
+      <field name=""Field3"" access=""public"">
+        <type native=""unsigned int"">uint</type>
+      </field>
+    </struct>
+  </namespace>
+</bindings>
+";
+
+            return ValidateGeneratedXmlLatestWindowsBindingsAsync(InputContents, expectedOutputContents);
+        }
+
+        protected override Task PointerToSelfTestImpl()
         {
             var inputContents = @"struct example_s {
    example_s* next;
@@ -1296,7 +1351,7 @@ struct MyStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task PointerToSelfViaTypedefTest()
+        protected override Task PointerToSelfViaTypedefTestImpl()
         {
             var inputContents = @"typedef struct example_s example_t;
 
@@ -1323,7 +1378,7 @@ struct example_s {
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task RemapTest()
+        protected override Task RemapTestImpl()
         {
             var inputContents = "typedef struct _MyStruct MyStruct;";
 
@@ -1339,7 +1394,7 @@ struct example_s {
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents, remappedNames: remappedNames);
         }
 
-        public override Task RemapNestedAnonymousTest()
+        protected override Task RemapNestedAnonymousTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -1392,7 +1447,7 @@ struct example_s {
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents, remappedNames: remappedNames);
         }
 
-        public override Task SkipNonDefinitionTest(string nativeType, string expectedManagedType)
+        protected override Task SkipNonDefinitionTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"typedef struct MyStruct MyStruct;
 
@@ -1425,7 +1480,7 @@ struct MyStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task SkipNonDefinitionPointerTest()
+        protected override Task SkipNonDefinitionPointerTestImpl()
         {
             var inputContents = @"typedef struct MyStruct* MyStructPtr;
 typedef struct MyStruct& MyStructRef;
@@ -1442,7 +1497,7 @@ typedef struct MyStruct& MyStructRef;
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task SkipNonDefinitionWithNativeTypeNameTest(string nativeType, string expectedManagedType)
+        protected override Task SkipNonDefinitionWithNativeTypeNameTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"typedef struct MyStruct MyStruct;
 
@@ -1475,7 +1530,7 @@ struct MyStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task TypedefTest(string nativeType, string expectedManagedType)
+        protected override Task TypedefTestImpl(string nativeType, string expectedManagedType)
         {
             var inputContents = $@"typedef {nativeType} MyTypedefAlias;
 
@@ -1508,7 +1563,7 @@ struct MyStruct
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UsingDeclarationTest()
+        protected override Task UsingDeclarationTestImpl()
         {
             var inputContents = @"struct MyStruct1A
 {
@@ -1543,7 +1598,68 @@ struct MyStruct1B : MyStruct1A
             return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task SourceLocationAttributeTest()
+        protected override Task WithAccessSpecifierTestImpl()
+        {
+            var inputContents = @"struct MyStruct1
+{
+    int Field1;
+    int Field2;
+};
+
+struct MyStruct2
+{
+    int Field1;
+    int Field2;
+};
+
+struct MyStruct3
+{
+    int Field1;
+    int Field2;
+};
+";
+
+            var expectedOutputContents = @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes"" ?>
+<bindings>
+  <namespace name=""ClangSharp.Test"">
+    <struct name=""MyStruct1"" access=""private"">
+      <field name=""Field1"" access=""private"">
+        <type>int</type>
+      </field>
+      <field name=""Field2"" access=""public"">
+        <type>int</type>
+      </field>
+    </struct>
+    <struct name=""MyStruct2"" access=""internal"">
+      <field name=""Field1"" access=""private"">
+        <type>int</type>
+      </field>
+      <field name=""Field2"" access=""public"">
+        <type>int</type>
+      </field>
+    </struct>
+    <struct name=""MyStruct3"" access=""public"">
+      <field name=""Field1"" access=""private"">
+        <type>int</type>
+      </field>
+      <field name=""Field2"" access=""internal"">
+        <type>int</type>
+      </field>
+    </struct>
+  </namespace>
+</bindings>
+";
+
+            var withAccessSpecifiers = new Dictionary<string, AccessSpecifier> {
+                ["MyStruct1"] = AccessSpecifier.Private,
+                ["MyStruct2"] = AccessSpecifier.Internal,
+                ["Field1"] = AccessSpecifier.Private,
+                ["MyStruct3.Field2"] = AccessSpecifier.Internal,
+            };
+            return ValidateGeneratedXmlLatestWindowsBindingsAsync(inputContents, expectedOutputContents, withAccessSpecifiers: withAccessSpecifiers);
+        }
+
+        protected override Task SourceLocationAttributeTestImpl()
         {
             const string InputContents = @"struct MyStruct
 {

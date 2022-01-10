@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.Runtime.InteropServices;
@@ -8,7 +8,7 @@ namespace ClangSharp.UnitTests
 {
     public sealed class XmlCompatibleWindows_CXXMethodDeclarationTest : CXXMethodDeclarationTest
     {
-        public override Task ConstructorTest()
+        protected override Task ConstructorTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -43,7 +43,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ConstructorWithInitializeTest()
+        protected override Task ConstructorWithInitializeTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -131,7 +131,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ConversionTest()
+        protected override Task ConversionTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -163,7 +163,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task DestructorTest()
+        protected override Task DestructorTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -189,7 +189,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task InstanceTest()
+        protected override Task InstanceTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -206,14 +206,12 @@ namespace ClangSharp.UnitTests
     }
 };
 ";
-            var callConv = "Cdecl";
             var entryPoint = RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "__ZN8MyStruct12MyVoidMethodEv" : "_ZN8MyStruct12MyVoidMethodEv";
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
                 if (!Environment.Is64BitProcess)
                 {
-                    callConv = "ThisCall";
                     entryPoint = "?MyVoidMethod@MyStruct@@QAEXXZ";
                 }
                 else
@@ -225,9 +223,12 @@ namespace ClangSharp.UnitTests
             var expectedOutputContents = $@"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes"" ?>
 <bindings>
   <namespace name=""ClangSharp.Test"">
-    <struct name=""MyStruct"" access=""public"">
-      <function name=""MyVoidMethod"" access=""public"" lib=""ClangSharpPInvokeGenerator"" convention=""{callConv}"" entrypoint=""{entryPoint}"" static=""true"">
+    <struct name=""MyStruct"" access=""public"" unsafe=""true"">
+      <function name=""MyVoidMethod"" access=""public"" lib=""ClangSharpPInvokeGenerator"" convention=""ThisCall"" entrypoint=""{entryPoint}"" static=""true"">
         <type>void</type>
+        <param name=""pThis"">
+          <type>MyStruct*</type>
+        </param>
       </function>
       <function name=""MyInt32Method"" access=""public"">
         <type>int</type>
@@ -245,7 +246,7 @@ namespace ClangSharp.UnitTests
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task MemberCallTest()
+        protected override Task MemberCallTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -321,7 +322,7 @@ int MyFunctionB(MyStruct* x)
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task MemberTest()
+        protected override Task MemberTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -353,7 +354,7 @@ int MyFunctionB(MyStruct* x)
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task NewKeywordTest()
+        protected override Task NewKeywordTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -462,7 +463,7 @@ int MyFunctionB(MyStruct* x)
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task NewKeywordVirtualTest()
+        protected override Task NewKeywordVirtualTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -471,13 +472,6 @@ int MyFunctionB(MyStruct* x)
     virtual int GetType(int objA, int objB) = 0;
 };";
 
-            var callConv = "Cdecl";
-
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && !Environment.Is64BitProcess)
-            {
-                callConv = "ThisCall";
-            }
-
             var expectedOutputContents = $@"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes"" ?>
 <bindings>
   <namespace name=""ClangSharp.Test"">
@@ -485,22 +479,7 @@ int MyFunctionB(MyStruct* x)
       <field name=""lpVtbl"" access=""public"">
         <type>void**</type>
       </field>
-      <delegate name=""_GetType"" access=""public"" convention=""{callConv}"">
-        <type>int</type>
-        <param name=""pThis"">
-          <type>MyStruct*</type>
-        </param>
-        <param name=""obj"">
-          <type>int</type>
-        </param>
-      </delegate>
-      <delegate name=""_GetType1"" access=""public"" convention=""{callConv}"">
-        <type>int</type>
-        <param name=""pThis"">
-          <type>MyStruct*</type>
-        </param>
-      </delegate>
-      <delegate name=""_GetType2"" access=""public"" convention=""{callConv}"">
+      <delegate name=""_GetType"" access=""public"" convention=""ThisCall"">
         <type>int</type>
         <param name=""pThis"">
           <type>MyStruct*</type>
@@ -512,15 +491,33 @@ int MyFunctionB(MyStruct* x)
           <type>int</type>
         </param>
       </delegate>
+      <delegate name=""_GetType1"" access=""public"" convention=""ThisCall"">
+        <type>int</type>
+        <param name=""pThis"">
+          <type>MyStruct*</type>
+        </param>
+      </delegate>
+      <delegate name=""_GetType2"" access=""public"" convention=""ThisCall"">
+        <type>int</type>
+        <param name=""pThis"">
+          <type>MyStruct*</type>
+        </param>
+        <param name=""obj"">
+          <type>int</type>
+        </param>
+      </delegate>
       <function name=""GetType"" access=""public"" unsafe=""true"">
         <type>int</type>
-        <param name=""obj"">
+        <param name=""objA"">
+          <type>int</type>
+        </param>
+        <param name=""objB"">
           <type>int</type>
         </param>
         <body>
           <code>fixed (MyStruct* pThis = &amp;this)
     {{
-        return Marshal.GetDelegateForFunctionPointer&lt;<delegate>_GetType</delegate>&gt;((IntPtr)(lpVtbl[<vtbl explicit=""False"">{(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? 2 : 0)}</vtbl>]))(<param special=""thisPtr"">pThis</param>, <param name=""obj"">obj</param>);
+        return Marshal.GetDelegateForFunctionPointer&lt;<delegate>_GetType</delegate>&gt;((IntPtr)(lpVtbl[<vtbl explicit=""False"">0</vtbl>]))(<param special=""thisPtr"">pThis</param>, <param name=""objA"">objA</param>, <param name=""objB"">objB</param>);
     }}</code>
         </body>
       </function>
@@ -535,16 +532,13 @@ int MyFunctionB(MyStruct* x)
       </function>
       <function name=""GetType"" access=""public"" unsafe=""true"">
         <type>int</type>
-        <param name=""objA"">
-          <type>int</type>
-        </param>
-        <param name=""objB"">
+        <param name=""obj"">
           <type>int</type>
         </param>
         <body>
           <code>fixed (MyStruct* pThis = &amp;this)
     {{
-        return Marshal.GetDelegateForFunctionPointer&lt;<delegate>_GetType2</delegate>&gt;((IntPtr)(lpVtbl[<vtbl explicit=""False"">{(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? 0 : 2)}</vtbl>]))(<param special=""thisPtr"">pThis</param>, <param name=""objA"">objA</param>, <param name=""objB"">objB</param>);
+        return Marshal.GetDelegateForFunctionPointer&lt;<delegate>_GetType2</delegate>&gt;((IntPtr)(lpVtbl[<vtbl explicit=""False"">2</vtbl>]))(<param special=""thisPtr"">pThis</param>, <param name=""obj"">obj</param>);
     }}</code>
         </body>
       </function>
@@ -556,7 +550,7 @@ int MyFunctionB(MyStruct* x)
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task NewKeywordVirtualWithExplicitVtblTest()
+        protected override Task NewKeywordVirtualWithExplicitVtblTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -565,12 +559,10 @@ int MyFunctionB(MyStruct* x)
     virtual int GetType(int objA, int objB) = 0;
 };";
 
-            var callConv = "Cdecl";
             var nativeCallConv = "";
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && !Environment.Is64BitProcess)
             {
-                callConv = "ThisCall";
                 nativeCallConv = " __attribute__((thiscall))";
             }
 
@@ -581,22 +573,7 @@ int MyFunctionB(MyStruct* x)
       <field name=""lpVtbl"" access=""public"">
         <type>Vtbl*</type>
       </field>
-      <delegate name=""_GetType"" access=""public"" convention=""{callConv}"">
-        <type>int</type>
-        <param name=""pThis"">
-          <type>MyStruct*</type>
-        </param>
-        <param name=""obj"">
-          <type>int</type>
-        </param>
-      </delegate>
-      <delegate name=""_GetType1"" access=""public"" convention=""{callConv}"">
-        <type>int</type>
-        <param name=""pThis"">
-          <type>MyStruct*</type>
-        </param>
-      </delegate>
-      <delegate name=""_GetType2"" access=""public"" convention=""{callConv}"">
+      <delegate name=""_GetType"" access=""public"" convention=""ThisCall"">
         <type>int</type>
         <param name=""pThis"">
           <type>MyStruct*</type>
@@ -608,15 +585,33 @@ int MyFunctionB(MyStruct* x)
           <type>int</type>
         </param>
       </delegate>
+      <delegate name=""_GetType1"" access=""public"" convention=""ThisCall"">
+        <type>int</type>
+        <param name=""pThis"">
+          <type>MyStruct*</type>
+        </param>
+      </delegate>
+      <delegate name=""_GetType2"" access=""public"" convention=""ThisCall"">
+        <type>int</type>
+        <param name=""pThis"">
+          <type>MyStruct*</type>
+        </param>
+        <param name=""obj"">
+          <type>int</type>
+        </param>
+      </delegate>
       <function name=""GetType"" access=""public"" unsafe=""true"">
         <type>int</type>
-        <param name=""obj"">
+        <param name=""objA"">
+          <type>int</type>
+        </param>
+        <param name=""objB"">
           <type>int</type>
         </param>
         <body>
           <code>fixed (MyStruct* pThis = &amp;this)
     {{
-        return Marshal.GetDelegateForFunctionPointer&lt;<delegate>_GetType</delegate>&gt;(lpVtbl-&gt;<vtbl explicit=""True"">GetType</vtbl>)(<param special=""thisPtr"">pThis</param>, <param name=""obj"">obj</param>);
+        return Marshal.GetDelegateForFunctionPointer&lt;<delegate>_GetType</delegate>&gt;(lpVtbl-&gt;<vtbl explicit=""True"">GetType</vtbl>)(<param special=""thisPtr"">pThis</param>, <param name=""objA"">objA</param>, <param name=""objB"">objB</param>);
     }}</code>
         </body>
       </function>
@@ -631,28 +626,25 @@ int MyFunctionB(MyStruct* x)
       </function>
       <function name=""GetType"" access=""public"" unsafe=""true"">
         <type>int</type>
-        <param name=""objA"">
-          <type>int</type>
-        </param>
-        <param name=""objB"">
+        <param name=""obj"">
           <type>int</type>
         </param>
         <body>
           <code>fixed (MyStruct* pThis = &amp;this)
     {{
-        return Marshal.GetDelegateForFunctionPointer&lt;<delegate>_GetType2</delegate>&gt;(lpVtbl-&gt;<vtbl explicit=""True"">GetType2</vtbl>)(<param special=""thisPtr"">pThis</param>, <param name=""objA"">objA</param>, <param name=""objB"">objB</param>);
+        return Marshal.GetDelegateForFunctionPointer&lt;<delegate>_GetType2</delegate>&gt;(lpVtbl-&gt;<vtbl explicit=""True"">GetType2</vtbl>)(<param special=""thisPtr"">pThis</param>, <param name=""obj"">obj</param>);
     }}</code>
         </body>
       </function>
       <vtbl>
-        <field name=""GetType{(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "2" : "")}"" access=""public"">
-          <type native=""{(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "int (int, int)" : "int (int)")}{nativeCallConv}"">IntPtr</type>
+        <field name=""GetType"" access=""public"">
+          <type native=""int (int, int){nativeCallConv}"">IntPtr</type>
         </field>
         <field name=""GetType1"" access=""public"">
           <type native=""int (){nativeCallConv}"">IntPtr</type>
         </field>
-        <field name=""GetType{(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "" : "2")}"" access=""public"">
-          <type native=""{(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "int (int)" : "int (int, int)")}{nativeCallConv}"">IntPtr</type>
+        <field name=""GetType2"" access=""public"">
+          <type native=""int (int){nativeCallConv}"">IntPtr</type>
         </field>
       </vtbl>
     </struct>
@@ -663,7 +655,7 @@ int MyFunctionB(MyStruct* x)
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents, PInvokeGeneratorConfigurationOptions.GenerateExplicitVtbls);
         }
 
-        public override Task OperatorTest()
+        protected override Task OperatorTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -729,7 +721,7 @@ MyStruct operator-(MyStruct lhs, MyStruct rhs)
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task OperatorCallTest()
+        protected override Task OperatorCallTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -825,7 +817,7 @@ MyStruct MyFunction2(MyStruct lhs, MyStruct rhs)
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task StaticTest()
+        protected override Task StaticTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -853,7 +845,7 @@ MyStruct MyFunction2(MyStruct lhs, MyStruct rhs)
             var expectedOutputContents = $@"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes"" ?>
 <bindings>
   <namespace name=""ClangSharp.Test"">
-    <struct name=""MyStruct"" access=""public"">
+    <struct name=""MyStruct"" access=""public"" unsafe=""true"">
       <function name=""MyVoidMethod"" access=""public"" lib=""ClangSharpPInvokeGenerator"" convention=""Cdecl"" entrypoint=""{entryPoint}"" static=""true"">
         <type>void</type>
       </function>
@@ -873,7 +865,7 @@ MyStruct MyFunction2(MyStruct lhs, MyStruct rhs)
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task ThisTest()
+        protected override Task ThisTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -905,7 +897,7 @@ MyStruct MyFunction2(MyStruct lhs, MyStruct rhs)
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task UnsafeDoesNotImpactDllImportTest()
+        protected override Task UnsafeDoesNotImpactDllImportTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -915,12 +907,12 @@ MyStruct MyFunction2(MyStruct lhs, MyStruct rhs)
     }
 };
 
-void MyFunction();";
+extern ""C"" void MyFunction();";
 
             var expectedOutputContents = @"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes"" ?>
 <bindings>
   <namespace name=""ClangSharp.Test"">
-    <struct name=""MyStruct"" access=""public"">
+    <struct name=""MyStruct"" access=""public"" unsafe=""true"">
       <function name=""MyVoidStarMethod"" access=""public"" unsafe=""true"">
         <type>void*</type>
         <code>return null;</code>
@@ -938,7 +930,7 @@ void MyFunction();";
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task VirtualTest()
+        protected override Task VirtualTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -955,13 +947,6 @@ void MyFunction();";
 };
 ";
 
-            var callConv = "Cdecl";
-
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && !Environment.Is64BitProcess)
-            {
-                callConv = "ThisCall";
-            }
-
             var expectedOutputContents = $@"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes"" ?>
 <bindings>
   <namespace name=""ClangSharp.Test"">
@@ -969,25 +954,25 @@ void MyFunction();";
       <field name=""lpVtbl"" access=""public"">
         <type>void**</type>
       </field>
-      <delegate name=""_MyVoidMethod"" access=""public"" convention=""{callConv}"">
+      <delegate name=""_MyVoidMethod"" access=""public"" convention=""ThisCall"">
         <type>void</type>
         <param name=""pThis"">
           <type>MyStruct*</type>
         </param>
       </delegate>
-      <delegate name=""_MyInt8Method"" access=""public"" convention=""{callConv}"">
+      <delegate name=""_MyInt8Method"" access=""public"" convention=""ThisCall"">
         <type native=""char"">sbyte</type>
         <param name=""pThis"">
           <type>MyStruct*</type>
         </param>
       </delegate>
-      <delegate name=""_MyInt32Method"" access=""public"" convention=""{callConv}"">
+      <delegate name=""_MyInt32Method"" access=""public"" convention=""ThisCall"">
         <type>int</type>
         <param name=""pThis"">
           <type>MyStruct*</type>
         </param>
       </delegate>
-      <delegate name=""_MyVoidStarMethod"" access=""public"" convention=""{callConv}"" unsafe=""true"">
+      <delegate name=""_MyVoidStarMethod"" access=""public"" convention=""ThisCall"" unsafe=""true"">
         <type>void*</type>
         <param name=""pThis"">
           <type>MyStruct*</type>
@@ -1037,7 +1022,7 @@ void MyFunction();";
             return ValidateGeneratedXmlCompatibleWindowsBindingsAsync(inputContents, expectedOutputContents);
         }
 
-        public override Task VirtualWithVtblIndexAttributeTest()
+        protected override Task VirtualWithVtblIndexAttributeTestImpl()
         {
             var inputContents = @"struct MyStruct
 {
@@ -1054,13 +1039,6 @@ void MyFunction();";
 };
 ";
 
-            var callConv = "Cdecl";
-
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && !Environment.Is64BitProcess)
-            {
-                callConv = "ThisCall";
-            }
-
             var expectedOutputContents = $@"<?xml version=""1.0"" encoding=""UTF-8"" standalone=""yes"" ?>
 <bindings>
   <namespace name=""ClangSharp.Test"">
@@ -1068,25 +1046,25 @@ void MyFunction();";
       <field name=""lpVtbl"" access=""public"">
         <type>void**</type>
       </field>
-      <delegate name=""_MyVoidMethod"" access=""public"" convention=""{callConv}"">
+      <delegate name=""_MyVoidMethod"" access=""public"" convention=""ThisCall"">
         <type>void</type>
         <param name=""pThis"">
           <type>MyStruct*</type>
         </param>
       </delegate>
-      <delegate name=""_MyInt8Method"" access=""public"" convention=""{callConv}"">
+      <delegate name=""_MyInt8Method"" access=""public"" convention=""ThisCall"">
         <type native=""char"">sbyte</type>
         <param name=""pThis"">
           <type>MyStruct*</type>
         </param>
       </delegate>
-      <delegate name=""_MyInt32Method"" access=""public"" convention=""{callConv}"">
+      <delegate name=""_MyInt32Method"" access=""public"" convention=""ThisCall"">
         <type>int</type>
         <param name=""pThis"">
           <type>MyStruct*</type>
         </param>
       </delegate>
-      <delegate name=""_MyVoidStarMethod"" access=""public"" convention=""{callConv}"" unsafe=""true"">
+      <delegate name=""_MyVoidStarMethod"" access=""public"" convention=""ThisCall"" unsafe=""true"">
         <type>void*</type>
         <param name=""pThis"">
           <type>MyStruct*</type>

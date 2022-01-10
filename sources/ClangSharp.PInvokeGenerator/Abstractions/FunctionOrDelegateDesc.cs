@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.Runtime.InteropServices;
@@ -6,18 +6,22 @@ using ClangSharp.Interop;
 
 namespace ClangSharp.Abstractions
 {
-    internal struct FunctionOrDelegateDesc<TCustomAttrGeneratorData>
+    internal struct FunctionOrDelegateDesc
     {
         public AccessSpecifier AccessSpecifier { get; set; }
         public string NativeTypeName { get; set; }
         public TypeDesc CanonicalNativeType { get; set; }
         public string EscapedName { get; set; }
         public string EntryPoint { get; set; }
+        public string ParentName { get; set; }
         public string LibraryPath { get; set; }
+        public string ReturnType { get; set; }
         public CallingConvention CallingConvention { get; set; }
         public FunctionOrDelegateFlags Flags { get; set; }
         public long? VtblIndex { get; set; }
         public CXSourceLocation? Location { get; set; }
+        public bool HasBody { get; set; }
+        public bool IsInherited { get; set; }
 
         public bool IsVirtual
         {
@@ -44,6 +48,21 @@ namespace ClangSharp.Abstractions
                 Flags = value
                       ? Flags | FunctionOrDelegateFlags.IsDllImport
                       : Flags & ~FunctionOrDelegateFlags.IsDllImport;
+            }
+        }
+
+        public bool IsManualImport
+        {
+            get
+            {
+                return (Flags & FunctionOrDelegateFlags.IsManualImport) != 0;
+            }
+
+            set
+            {
+                Flags = value
+                      ? Flags | FunctionOrDelegateFlags.IsManualImport
+                      : Flags & ~FunctionOrDelegateFlags.IsManualImport;
             }
         }
 
@@ -198,7 +217,37 @@ namespace ClangSharp.Abstractions
             }
         }
 
-        public Action<TCustomAttrGeneratorData> WriteCustomAttrs { get; set; }
-        public TCustomAttrGeneratorData CustomAttrGeneratorData { get; set; }
+        public bool NeedsReturnFixup
+        {
+            get
+            {
+                return (Flags & FunctionOrDelegateFlags.NeedsReturnFixup) != 0;
+            }
+
+            set
+            {
+                Flags = value
+                      ? Flags | FunctionOrDelegateFlags.NeedsReturnFixup
+                      : Flags & ~FunctionOrDelegateFlags.NeedsReturnFixup;
+            }
+        }
+
+        public bool IsCxxConstructor
+        {
+            get
+            {
+                return (Flags & FunctionOrDelegateFlags.IsCxxConstructor) != 0;
+            }
+
+            set
+            {
+                Flags = value
+                      ? Flags | FunctionOrDelegateFlags.IsCxxConstructor
+                      : Flags & ~FunctionOrDelegateFlags.IsCxxConstructor;
+            }
+        }
+
+        public Action<object> WriteCustomAttrs { get; set; }
+        public object CustomAttrGeneratorData { get; set; }
     }
 }

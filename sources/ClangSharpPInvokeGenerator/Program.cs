@@ -1,17 +1,16 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Help;
 using System.CommandLine.Invocation;
-using System.CommandLine.IO;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using ClangSharp.Interop;
-using Process = System.Diagnostics.Process;
+using ClangSharp.Abstractions;
 
 namespace ClangSharp
 {
@@ -19,63 +18,70 @@ namespace ClangSharp
     {
         private static RootCommand s_rootCommand;
         private static Option s_configOption;
+        private static Option s_versionOption;
 
-        private static readonly (string Name, string Description)[] s_configOptions = new (string Name, string Description)[]
+        private static readonly HelpItem[] s_configOptions = new HelpItem[]
         {
-            ("?, h, help", "Show help and usage information for -c, --config"),
+            new HelpItem("?, h, help", "Show help and usage information for -c, --config"),
 
-            ("", ""),   // Codegen Options
+            // Codegen Options
 
-            ("compatible-codegen", "Bindings should be generated with .NET Standard 2.0 compatibility. Setting this disables preview code generation."),
-            ("latest-codegen", "Bindings should be generated for the latest stable version of .NET/C#. This is currently .NET 5/C# 9."),
-            ("preview-codegen", "Bindings should be generated for the latest preview version of .NET/C#. This is currently .NET 6/C# 10."),
+            new HelpItem("compatible-codegen", "Bindings should be generated with .NET Standard 2.0 compatibility. Setting this disables preview code generation."),
+            new HelpItem("latest-codegen", "Bindings should be generated for the latest stable version of .NET/C#. This is currently .NET 5/C# 9."),
+            new HelpItem("preview-codegen", "Bindings should be generated for the latest preview version of .NET/C#. This is currently .NET 6/C# 10."),
 
-            ("", ""),   // File Options
+            // File Options
 
-            ("single-file", "Bindings should be generated to a single output file. This is the default."),
-            ("multi-file", "Bindings should be generated so there is approximately one type per file."),
+            new HelpItem("single-file", "Bindings should be generated to a single output file. This is the default."),
+            new HelpItem("multi-file", "Bindings should be generated so there is approximately one type per file."),
 
-            ("", ""),   // Type Options
+            // Type Options
 
-            ("unix-types", "Bindings should be generated assuming Unix defaults. This is the default on Unix platforms."),
-            ("windows-types", "Bindings should be generated assuming Windows defaults. This is the default on Windows platforms."),
+            new HelpItem("unix-types", "Bindings should be generated assuming Unix defaults. This is the default on Unix platforms."),
+            new HelpItem("windows-types", "Bindings should be generated assuming Windows defaults. This is the default on Windows platforms."),
 
-            ("", ""),   // Exclusion Options
+            // Exclusion Options
 
-            ("exclude-anonymous-field-helpers", "The helper ref properties generated for fields in nested anonymous structs and unions should not be generated."),
-            ("exclude-com-proxies", "Types recognized as COM proxies should not have bindings generated. Thes are currently function declarations ending with _UserFree, _UserMarshal, _UserSize, _UserUnmarshal, _Proxy, or _Stub."),
-            ("exclude-default-remappings", "Default remappings for well known types should not be added. This currently includes intptr_t, ptrdiff_t, size_t, and uintptr_t"),
-            ("exclude-empty-records", "Bindings for records that contain no members should not be generated. These are commonly encountered for opaque handle like types such as HWND."),
-            ("exclude-enum-operators", "Bindings for operators over enum types should not be generated. These are largely unnecessary in C# as the operators are available by default."),
-            ("exclude-fnptr-codegen", "Generated bindings for latest or preview codegen should not use function pointers."),
-            ("exclude-funcs-with-body", "Bindings for functions with bodies should not be generated."),
-            ("preview-codegen-nint", "Generated bindings for latest or preview codegen should not use nint or nuint."),
-            ("exclude-using-statics-for-enums", "Enum usages should be fully qualified and should not include a corresponding 'using static EnumName;'"),
+            new HelpItem("exclude-anonymous-field-helpers", "The helper ref properties generated for fields in nested anonymous structs and unions should not be generated."),
+            new HelpItem("exclude-com-proxies", "Types recognized as COM proxies should not have bindings generated. Thes are currently function declarations ending with _UserFree, _UserMarshal, _UserSize, _UserUnmarshal, _Proxy, or _Stub."),
+            new HelpItem("exclude-default-remappings", "Default remappings for well known types should not be added. This currently includes intptr_t, ptrdiff_t, size_t, and uintptr_t"),
+            new HelpItem("exclude-empty-records", "Bindings for records that contain no members should not be generated. These are commonly encountered for opaque handle like types such as HWND."),
+            new HelpItem("exclude-enum-operators", "Bindings for operators over enum types should not be generated. These are largely unnecessary in C# as the operators are available by default."),
+            new HelpItem("exclude-fnptr-codegen", "Generated bindings for latest or preview codegen should not use function pointers."),
+            new HelpItem("exclude-funcs-with-body", "Bindings for functions with bodies should not be generated."),
+            new HelpItem("exclude-using-statics-for-enums", "Enum usages should be fully qualified and should not include a corresponding 'using static EnumName;'"),
 
-            ("", ""),   // VTBL Options
+            // VTBL Options
 
-            ("explicit-vtbls", "VTBLs should have an explicit type generated with named fields per entry."),
-            ("implicit-vtbls", "VTBLs should be implicit to reduce metadata bloat. This is the current default"),
+            new HelpItem("explicit-vtbls", "VTBLs should have an explicit type generated with named fields per entry."),
+            new HelpItem("implicit-vtbls", "VTBLs should be implicit to reduce metadata bloat. This is the current default"),
+            new HelpItem("trimmable-vtbls", "VTBLs should be defined but not used in helper methods to reduce metadata bloat when trimming."),
 
-            ("", ""),   // Test Options
+            // Test Options
 
-            ("generate-tests-nunit", "Basic tests validating size, blittability, and associated metadata should be generated for NUnit."),
-            ("generate-tests-xunit", "Basic tests validating size, blittability, and associated metadata should be generated for XUnit."),
+            new HelpItem("generate-tests-nunit", "Basic tests validating size, blittability, and associated metadata should be generated for NUnit."),
+            new HelpItem("generate-tests-xunit", "Basic tests validating size, blittability, and associated metadata should be generated for XUnit."),
 
-            ("", ""),   // Generation Options
+            // Generation Options
 
-            ("generate-aggressive-inlining", "[MethodImpl(MethodImplOptions.AggressiveInlining)] should be added to generated helper functions."),
-            ("generate-cpp-attributes", "[CppAttributeList(\"\")] should be generated to document the encountered C++ attributes."),
-            ("generate-macro-bindings", "Bindings for macro-definitions should be generated. This currently only works with value like macros and not function-like ones."),
-            ("generate-native-inheritance-attribute", "[NativeInheritance(\"\")] attribute should be generated to document the encountered C++ base type."),
-            ("generate-template-bindings", "Bindings for template-definitions should be generated. This is currently experimental."),
-            ("generate-vtbl-index-attribute", "[VtblIndex(#)] attribute should be generated to document the underlying VTBL index for a helper method."),
+            new HelpItem("generate-aggressive-inlining", "[MethodImpl(MethodImplOptions.AggressiveInlining)] should be added to generated helper functions."),
+            new HelpItem("generate-cpp-attributes", "[CppAttributeList(\"\")] should be generated to document the encountered C++ attributes."),
+            new HelpItem("generate-doc-includes", "<include> xml documentation tags should be generated for declarations."),
+            new HelpItem("generate-file-scoped-namespaces", "Namespaces should be scoped to the file to reduce nesting."),
+            new HelpItem("generate-helper-types", "Code files should be generated for various helper attributes and declared transparent structs."),
+            new HelpItem("generate-macro-bindings", "Bindings for macro-definitions should be generated. This currently only works with value like macros and not function-like ones."),
+            new HelpItem("generate-marker-interfaces", "Bindings for marker interfaces representing native inheritance hierarchies should be generated."),
+            new HelpItem("generate-native-inheritance-attribute", "[NativeInheritance(\"\")] attribute should be generated to document the encountered C++ base type."),
+            new HelpItem("generate-setslastsystemerror-attribute", "[SetsLastSystemError] attribute should be generated rather than using SetLastError = true."),
+            new HelpItem("generate-template-bindings", "Bindings for template-definitions should be generated. This is currently experimental."),
+            new HelpItem("generate-unmanaged-constants", "Unmanaged constants should be generated using static ref readonly properties. This is currently experimental."),
+            new HelpItem("generate-vtbl-index-attribute", "[VtblIndex(#)] attribute should be generated to document the underlying VTBL index for a helper method."),
 
-            ("", ""),   // Logging Options
+            // Logging Options
 
-            ("log-exclusions", "A list of excluded declaration types should be generated. This will also log if the exclusion was due to an exact or partial match."),
-            ("log-potential-typedef-remappings", "A list of potential typedef remappings should be generated. This can help identify missing remappings."),
-            ("log-visited-files", "A list of the visited files should be generated. This can help identify traversal issues."),
+            new HelpItem("log-exclusions", "A list of excluded declaration types should be generated. This will also log if the exclusion was due to an exact or partial match."),
+            new HelpItem("log-potential-typedef-remappings", "A list of potential typedef remappings should be generated. This can help identify missing remappings."),
+            new HelpItem("log-visited-files", "A list of the visited files should be generated. This can help identify traversal issues."),
         };
 
 #pragma warning disable IDE1006
@@ -93,24 +99,32 @@ namespace ClangSharp
             AddFileOption(s_rootCommand);
             AddFileDirectoryOption(s_rootCommand);
             AddHeaderOption(s_rootCommand);
+            AddIncludeOption(s_rootCommand);
             AddIncludeDirectoryOption(s_rootCommand);
             AddLanguageOption(s_rootCommand);
             AddLibraryOption(s_rootCommand);
             AddMethodClassNameOption(s_rootCommand);
             AddNamespaceOption(s_rootCommand);
+            AddOutputModeOption(s_rootCommand);
             AddOutputOption(s_rootCommand);
             AddPrefixStripOption(s_rootCommand);
             AddRemapOption(s_rootCommand);
             AddStdOption(s_rootCommand);
             AddTestOutputOption(s_rootCommand);
             AddTraverseOption(s_rootCommand);
+            AddVersionOption(s_rootCommand);
+            AddWithAccessSpecifierOption(s_rootCommand);
             AddWithAttributeOption(s_rootCommand);
             AddWithCallConvOption(s_rootCommand);
+            AddWithClassOption(s_rootCommand);
             AddWithLibraryPathOption(s_rootCommand);
+            AddWithManualImportOption(s_rootCommand);
+            AddWithNamespaceOption(s_rootCommand);
             AddWithSetLastErrorOption(s_rootCommand);
+            AddWithSuppressGCTransitionOption(s_rootCommand);
+            AddWithTransparentStructOption(s_rootCommand);
             AddWithTypeOption(s_rootCommand);
             AddWithUsingOption(s_rootCommand);
-            AddOutputModeOption(s_rootCommand);
 
             return await s_rootCommand.InvokeAsync(args);
         }
@@ -125,6 +139,7 @@ namespace ClangSharp
             var files = context.ParseResult.ValueForOption<string[]>("--file");
             var fileDirectory = context.ParseResult.ValueForOption<string>("--file-directory");
             var headerFile = context.ParseResult.ValueForOption<string>("--headerFile");
+            var includedNames = context.ParseResult.ValueForOption<string[]>("--include");
             var includeDirectories = context.ParseResult.ValueForOption<string[]>("--include-directory");
             var language = context.ParseResult.ValueForOption<string>("--language");
             var libraryPath = context.ParseResult.ValueForOption<string>("--libraryPath");
@@ -132,17 +147,36 @@ namespace ClangSharp
             var methodPrefixToStrip = context.ParseResult.ValueForOption<string>("--prefixStrip");
             var namespaceName = context.ParseResult.ValueForOption<string>("--namespace");
             var outputLocation = context.ParseResult.ValueForOption<string>("--output");
+            var outputMode = context.ParseResult.ValueForOption<PInvokeGeneratorOutputMode>("--output-mode");
             var remappedNameValuePairs = context.ParseResult.ValueForOption<string[]>("--remap");
             var std = context.ParseResult.ValueForOption<string>("--std");
             var testOutputLocation = context.ParseResult.ValueForOption<string>("--test-output");
             var traversalNames = context.ParseResult.ValueForOption<string[]>("--traverse");
+            var withAccessSpecifierNameValuePairs = context.ParseResult.ValueForOption<string[]>("--with-access-specifier");
             var withAttributeNameValuePairs = context.ParseResult.ValueForOption<string[]>("--with-attribute");
             var withCallConvNameValuePairs = context.ParseResult.ValueForOption<string[]>("--with-callconv");
+            var withClassNameValuePairs = context.ParseResult.ValueForOption<string[]>("--with-class");
             var withLibraryPathNameValuePairs = context.ParseResult.ValueForOption<string[]>("--with-librarypath");
+            var withManualImports = context.ParseResult.ValueForOption<string[]>("--with-manual-import");
+            var withNamespaceNameValuePairs = context.ParseResult.ValueForOption<string[]>("--with-namespace");
             var withSetLastErrors = context.ParseResult.ValueForOption<string[]>("--with-setlasterror");
+            var withSuppressGCTransitions = context.ParseResult.ValueForOption<string[]>("--with-suppressgctransition");
+            var withTransparentStructNameValuePairs = context.ParseResult.ValueForOption<string[]>("--with-transparent-struct");
             var withTypeNameValuePairs = context.ParseResult.ValueForOption<string[]>("--with-type");
             var withUsingNameValuePairs = context.ParseResult.ValueForOption<string[]>("--with-using");
-            var outputMode = context.ParseResult.ValueForOption<PInvokeGeneratorOutputMode>("--output-mode");
+
+            var versionResult = context.ParseResult.FindResultFor(s_versionOption);
+
+            if (versionResult is not null)
+            {
+                var helpBuilder = new CustomHelpBuilder(context.Console);
+
+                helpBuilder.WriteLine($"{s_rootCommand.Description} version 13.0.0");
+                helpBuilder.WriteLine($"  {clang.getClangVersion()}");
+                helpBuilder.WriteLine($"  {clangsharp.getVersion()}");
+
+                return -1;
+            }
 
             var errorList = new List<string>();
 
@@ -162,11 +196,20 @@ namespace ClangSharp
             }
 
             ParseKeyValuePairs(remappedNameValuePairs, errorList, out Dictionary<string, string> remappedNames);
+            ParseKeyValuePairs(withAccessSpecifierNameValuePairs, errorList, out Dictionary<string, AccessSpecifier> withAccessSpecifiers);
             ParseKeyValuePairs(withAttributeNameValuePairs, errorList, out Dictionary<string, IReadOnlyList<string>> withAttributes);
             ParseKeyValuePairs(withCallConvNameValuePairs, errorList, out Dictionary<string, string> withCallConvs);
-            ParseKeyValuePairs(withLibraryPathNameValuePairs, errorList, out Dictionary<string, string> withLibraryPath);
+            ParseKeyValuePairs(withClassNameValuePairs, errorList, out Dictionary<string, string> withClasses);
+            ParseKeyValuePairs(withLibraryPathNameValuePairs, errorList, out Dictionary<string, string> withLibraryPaths);
+            ParseKeyValuePairs(withNamespaceNameValuePairs, errorList, out Dictionary<string, string> withNamespaces);
+            ParseKeyValuePairs(withTransparentStructNameValuePairs, errorList, out Dictionary<string, (string, PInvokeGeneratorTransparentStructKind)> withTransparentStructs);
             ParseKeyValuePairs(withTypeNameValuePairs, errorList, out Dictionary<string, string> withTypes);
             ParseKeyValuePairs(withUsingNameValuePairs, errorList, out Dictionary<string, IReadOnlyList<string>> withUsings);
+
+            foreach (var key in withTransparentStructs.Keys)
+            {
+                remappedNames.Add(key, key);
+            }
 
             var configOptions = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? PInvokeGeneratorConfigurationOptions.None : PInvokeGeneratorConfigurationOptions.GenerateUnixTypes;
             var printConfigHelp = false;
@@ -297,12 +340,21 @@ namespace ClangSharp
                     case "explicit-vtbls":
                     {
                         configOptions |= PInvokeGeneratorConfigurationOptions.GenerateExplicitVtbls;
+                        configOptions &= ~PInvokeGeneratorConfigurationOptions.GenerateTrimmableVtbls;
                         break;
                     }
 
                     case "implicit-vtbls":
                     {
                         configOptions &= ~PInvokeGeneratorConfigurationOptions.GenerateExplicitVtbls;
+                        configOptions &= ~PInvokeGeneratorConfigurationOptions.GenerateTrimmableVtbls;
+                        break;
+                    }
+
+                    case "trimmable-vtbls":
+                    {
+                        configOptions &= ~PInvokeGeneratorConfigurationOptions.GenerateExplicitVtbls;
+                        configOptions |= PInvokeGeneratorConfigurationOptions.GenerateTrimmableVtbls;
                         break;
                     }
 
@@ -352,9 +404,33 @@ namespace ClangSharp
                         break;
                     }
 
+                    case "generate-doc-includes":
+                    {
+                        configOptions |= PInvokeGeneratorConfigurationOptions.GenerateDocIncludes;
+                        break;
+                    }
+
+                    case "generate-file-scoped-namespaces":
+                    {
+                        configOptions |= PInvokeGeneratorConfigurationOptions.GenerateFileScopedNamespaces;
+                        break;
+                    }
+
+                    case "generate-helper-types":
+                    {
+                        configOptions |= PInvokeGeneratorConfigurationOptions.GenerateHelperTypes;
+                        break;
+                    }
+
                     case "generate-macro-bindings":
                     {
                         configOptions |= PInvokeGeneratorConfigurationOptions.GenerateMacroBindings;
+                        break;
+                    }
+
+                    case "generate-marker-interfaces":
+                    {
+                        configOptions |= PInvokeGeneratorConfigurationOptions.GenerateMarkerInterfaces;
                         break;
                     }
 
@@ -364,9 +440,21 @@ namespace ClangSharp
                         break;
                     }
 
+                    case "generate-setslastsystemerror-attribute":
+                    {
+                        configOptions |= PInvokeGeneratorConfigurationOptions.GenerateSetsLastSystemErrorAttribute;
+                        break;
+                    }
+
                     case "generate-template-bindings":
                     {
                         configOptions |= PInvokeGeneratorConfigurationOptions.GenerateTemplateBindings;
+                        break;
+                    }
+
+                    case "generate-unmanaged-constants":
+                    {
+                        configOptions |= PInvokeGeneratorConfigurationOptions.GenerateUnmanagedConstants;
                         break;
                     }
 
@@ -420,11 +508,9 @@ namespace ClangSharp
             if (printConfigHelp)
             {
                 var helpBuilder = new CustomHelpBuilder(context.Console);
+
                 helpBuilder.Write(s_configOption);
-
-                context.Console.Out.WriteLine();
-                context.Console.Out.WriteLine();
-
+                helpBuilder.WriteLine();
                 helpBuilder.Write(s_configOptions);
 
                 return -1;
@@ -432,6 +518,9 @@ namespace ClangSharp
 
             if (errorList.Any())
             {
+                context.Console.Error.Write($"Error in args for '{files.FirstOrDefault()}'");
+                context.Console.Error.Write(Environment.NewLine);
+
                 foreach (var error in errorList)
                 {
                     context.Console.Error.Write(error);
@@ -443,12 +532,23 @@ namespace ClangSharp
                 return -1;
             }
 
-            var clangCommandLineArgs = new string[]
+            string[] clangCommandLineArgs;
+
+            if (string.IsNullOrWhiteSpace(std))
             {
-                $"--language={language}",               // Treat subsequent input files as having type <language>
-                $"--std={std}",                         // Language standard to compile for
-                "-Wno-pragma-once-outside-header"       // We are processing files which may be header files
-            };
+                clangCommandLineArgs = new string[] {
+                    $"--language={language}",               // Treat subsequent input files as having type <language>
+                    "-Wno-pragma-once-outside-header"       // We are processing files which may be header files
+                };
+            }
+            else
+            {
+                clangCommandLineArgs = new string[] {
+                    $"--language={language}",               // Treat subsequent input files as having type <language>
+                    $"--std={std}",                         // Language standard to compile for
+                    "-Wno-pragma-once-outside-header"       // We are processing files which may be header files
+                };
+            }
 
             clangCommandLineArgs = clangCommandLineArgs.Concat(includeDirectories.Select(x => "--include-directory=" + x)).ToArray();
             clangCommandLineArgs = clangCommandLineArgs.Concat(defineMacros.Select(x => "--define-macro=" + x)).ToArray();
@@ -459,7 +559,28 @@ namespace ClangSharp
             translationFlags |= CXTranslationUnit_Flags.CXTranslationUnit_IncludeAttributedTypes;               // Include attributed types in CXType
             translationFlags |= CXTranslationUnit_Flags.CXTranslationUnit_VisitImplicitAttributes;              // Implicit attributes should be visited
 
-            var config = new PInvokeGeneratorConfiguration(libraryPath, namespaceName, outputLocation, testOutputLocation, outputMode, configOptions, excludedNames, headerFile, methodClassName, methodPrefixToStrip, remappedNames, traversalNames, withAttributes, withCallConvs, withLibraryPath, withSetLastErrors, withTypes, withUsings);
+            var config = new PInvokeGeneratorConfiguration(namespaceName, outputLocation, headerFile, outputMode, configOptions) {
+                DefaultClass = methodClassName,
+                ExcludedNames = excludedNames,
+                IncludedNames = includedNames,
+                LibraryPath = libraryPath,
+                MethodPrefixToStrip = methodPrefixToStrip,
+                RemappedNames = remappedNames,
+                TraversalNames = traversalNames,
+                TestOutputLocation = testOutputLocation,
+                WithAccessSpecifiers = withAccessSpecifiers,
+                WithAttributes = withAttributes,
+                WithCallConvs = withCallConvs,
+                WithClasses = withClasses,
+                WithLibraryPaths = withLibraryPaths,
+                WithManualImports = withManualImports,
+                WithNamespaces = withNamespaces,
+                WithSetLastErrors = withSetLastErrors,
+                WithSuppressGCTransitions = withSuppressGCTransitions,
+                WithTransparentStructs = withTransparentStructs,
+                WithTypes = withTypes,
+                WithUsings = withUsings,
+            };
 
             if (config.GenerateMacroBindings)
             {
@@ -522,7 +643,7 @@ namespace ClangSharp
 
                 if (pinvokeGenerator.Diagnostics.Count != 0)
                 {
-                    Console.WriteLine("Diagnostics for binding generation:");
+                    Console.WriteLine($"Diagnostics for binding generation of {pinvokeGenerator.FilePath}:");
 
                     foreach (var diagnostic in pinvokeGenerator.Diagnostics)
                     {
@@ -554,7 +675,7 @@ namespace ClangSharp
             return exitCode;
         }
 
-        private static void ParseKeyValuePairs(string[] keyValuePairs, List<string> errorList, out Dictionary<string, string> result)
+        private static void ParseKeyValuePairs(IEnumerable<string> keyValuePairs, List<string> errorList, out Dictionary<string, string> result)
         {
             result = new Dictionary<string, string>();
 
@@ -580,7 +701,73 @@ namespace ClangSharp
             }
         }
 
-        private static void ParseKeyValuePairs(string[] keyValuePairs, List<string> errorList, out Dictionary<string, IReadOnlyList<string>> result)
+        private static void ParseKeyValuePairs(IEnumerable<string> keyValuePairs, List<string> errorList, out Dictionary<string, AccessSpecifier> result)
+        {
+            result = new Dictionary<string, AccessSpecifier>();
+
+            foreach (var keyValuePair in keyValuePairs)
+            {
+                var parts = keyValuePair.Split('=');
+
+                if (parts.Length != 2)
+                {
+                    errorList.Add($"Error: Invalid key/value pair argument: {keyValuePair}. Expected 'name=value'");
+                    continue;
+                }
+
+                var key = parts[0].TrimEnd();
+
+                if (result.ContainsKey(key))
+                {
+                    errorList.Add($"Error: A key with the given name already exists: {key}. Existing: {result[key]}");
+                    continue;
+                }
+
+                result.Add(key, PInvokeGeneratorConfiguration.ConvertStringToAccessSpecifier(parts[1].TrimStart()));
+            }
+        }
+
+        private static void ParseKeyValuePairs(IEnumerable<string> keyValuePairs, List<string> errorList, out Dictionary<string, (string, PInvokeGeneratorTransparentStructKind)> result)
+        {
+            result = new Dictionary<string, (string, PInvokeGeneratorTransparentStructKind)>();
+
+            foreach (var keyValuePair in keyValuePairs)
+            {
+                var parts = keyValuePair.Split('=');
+
+                if (parts.Length != 2)
+                {
+                    errorList.Add($"Error: Invalid key/value pair argument: {keyValuePair}. Expected 'name=value' or 'name=value;kind'");
+                    continue;
+                }
+
+                var key = parts[0].TrimEnd();
+
+                if (result.ContainsKey(key))
+                {
+                    errorList.Add($"Error: A key with the given name already exists: {key}. Existing: {result[key]}");
+                    continue;
+                }
+
+                parts = parts[1].Split(';');
+
+                if (parts.Length == 1)
+                {
+                    result.Add(key, (parts[0], PInvokeGeneratorTransparentStructKind.Unknown));
+                }
+                else if ((parts.Length == 2) && Enum.TryParse<PInvokeGeneratorTransparentStructKind>(parts[1], out var transparentStructKind))
+                {
+                    result.Add(key, (parts[0], transparentStructKind));
+                }
+                else
+                {
+                    errorList.Add($"Error: Invalid key/value pair argument: {keyValuePair}. Expected 'name=value' or 'name=value;kind'");
+                    continue;
+                }
+            }
+        }
+
+        private static void ParseKeyValuePairs(IEnumerable<string> keyValuePairs, List<string> errorList, out Dictionary<string, IReadOnlyList<string>> result)
         {
             result = new Dictionary<string, IReadOnlyList<string>>();
 
@@ -608,15 +795,13 @@ namespace ClangSharp
 
         private static void AddAdditionalOption(RootCommand rootCommand)
         {
-            var option = new Option(new string[] { "--additional", "-a" }, "An argument to pass to Clang when parsing the input files.")
-            {
-                Argument = new Argument("<arg>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.OneOrMore,
-                }
-            };
-            option.Argument.SetDefaultValue(Array.Empty<string>());
+            var option = new Option(
+                aliases: new string[] { "--additional", "-a" },
+                description: "An argument to pass to Clang when parsing the input files.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
 
             rootCommand.AddOption(option);
         }
@@ -625,360 +810,416 @@ namespace ClangSharp
         {
             if (s_configOption is null)
             {
-                s_configOption = new Option(new string[] { "--config", "-c" }, "A configuration option that controls how the bindings are generated. Specify 'help' to see the available options.")
-                {
-                    Argument = new Argument("<arg>")
-                    {
-                        ArgumentType = typeof(string),
-                        Arity = ArgumentArity.OneOrMore,
-                    }
-                };
-                s_configOption.Argument.SetDefaultValue(Array.Empty<string>());
+                s_configOption = new Option(
+                    aliases: new string[] { "--config", "-c" },
+                    description: "A configuration option that controls how the bindings are generated. Specify 'help' to see the available options.",
+                    argumentType: typeof(string),
+                    getDefaultValue: Array.Empty<string>,
+                    arity: ArgumentArity.OneOrMore
+                );
             }
             rootCommand.AddOption(s_configOption);
         }
 
         private static void AddDefineMacroOption(RootCommand rootCommand)
         {
-            var option = new Option(new string[] { "--define-macro", "-D" }, "Define <macro> to <value> (or 1 if <value> omitted).")
-            {
-                Argument = new Argument("<macro>=<value>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.OneOrMore,
-                }
-            };
-            option.Argument.SetDefaultValue(Array.Empty<string>());
+            var option = new Option(
+                aliases: new string[] { "--define-macro", "-D" },
+                description: "Define <macro> to <value> (or 1 if <value> omitted).",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
 
             rootCommand.AddOption(option);
         }
 
         private static void AddExcludeOption(RootCommand rootCommand)
         {
-            var option = new Option(new string[] { "--exclude", "-e" }, "A declaration name to exclude from binding generation.")
-            {
-                Argument = new Argument("<name>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.OneOrMore,
-                }
-            };
-            option.Argument.SetDefaultValue(Array.Empty<string>());
+            var option = new Option(
+                aliases: new string[] { "--exclude", "-e" },
+                description: "A declaration name to exclude from binding generation.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
 
             rootCommand.AddOption(option);
         }
 
         private static void AddFileOption(RootCommand rootCommand)
         {
-            var option = new Option(new string[] { "--file", "-f" }, "A file to parse and generate bindings for.")
-            {
-                Argument = new Argument("<file>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.OneOrMore,
-                }
-            };
-            option.Argument.SetDefaultValue(Array.Empty<string>());
+            var option = new Option(
+                aliases: new string[] { "--file", "-f" },
+                description: "A file to parse and generate bindings for.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
 
             rootCommand.AddOption(option);
         }
 
         private static void AddFileDirectoryOption(RootCommand rootCommand)
         {
-            var option = new Option(new string[] { "--file-directory", "-F" }, "The base path for files to parse.")
-            {
-                Argument = new Argument("<directory>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.ExactlyOne,
-                }
-            };
-            option.Argument.SetDefaultValue(string.Empty);
+            var option = new Option(
+                aliases: new string[] { "--file-directory", "-F" },
+                description: "The base path for files to parse.",
+                argumentType: typeof(string),
+                getDefaultValue: () => string.Empty,
+                arity: ArgumentArity.ExactlyOne
+            );
 
             rootCommand.AddOption(option);
         }
 
         private static void AddHeaderOption(RootCommand rootCommand)
         {
-            var option = new Option(new string[] { "--headerFile", "-h" }, "A file which contains the header to prefix every generated file with.")
-            {
-                Argument = new Argument("<file>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.ExactlyOne,
-                }
-            };
-            option.Argument.SetDefaultValue(string.Empty);
+            var option = new Option(
+                aliases: new string[] { "--headerFile", "-h" },
+                description: "A file which contains the header to prefix every generated file with.",
+                argumentType: typeof(string),
+                getDefaultValue: () => string.Empty,
+                arity: ArgumentArity.ExactlyOne
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddIncludeOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--include", "-i" },
+                description: "A declaration name to include in binding generation.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
 
             rootCommand.AddOption(option);
         }
 
         private static void AddIncludeDirectoryOption(RootCommand rootCommand)
         {
-            var option = new Option(new string[] { "--include-directory", "-I" }, "Add directory to include search path.")
-            {
-                Argument = new Argument("<arg>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.OneOrMore,
-                }
-            };
-            option.Argument.SetDefaultValue(Array.Empty<string>());
+            var option = new Option(
+                aliases: new string[] { "--include-directory", "-I" },
+                description: "Add directory to include search path.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
 
             rootCommand.AddOption(option);
         }
 
         private static void AddLanguageOption(RootCommand rootCommand)
         {
-            var option = new Option(new string[] { "--language", "-x" }, "Treat subsequent input files as having type <language>.")
-            {
-                Argument = new Argument("<arg>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.ExactlyOne,
-                }
-            };
-            option.Argument.SetDefaultValue("c++");
+            var option = new Option(
+                aliases: new string[] { "--language", "-x" },
+                description: "Treat subsequent input files as having type <language>.",
+                argumentType: typeof(string),
+                getDefaultValue: () => "c++",
+                arity: ArgumentArity.ExactlyOne
+            );
 
             rootCommand.AddOption(option);
         }
 
         private static void AddLibraryOption(RootCommand rootCommand)
         {
-            var option = new Option(new string[] { "--libraryPath", "-l" }, "The string to use in the DllImport attribute used when generating bindings.")
-            {
-                Argument = new Argument("<dllName>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.ExactlyOne,
-                }
-            };
-            option.Argument.SetDefaultValue(string.Empty);
+            var option = new Option(
+                aliases: new string[] { "--libraryPath", "-l" },
+                description: "The string to use in the DllImport attribute used when generating bindings.",
+                argumentType: typeof(string),
+                getDefaultValue: () => string.Empty,
+                arity: ArgumentArity.ExactlyOne
+            );
 
             rootCommand.AddOption(option);
         }
 
         private static void AddMethodClassNameOption(RootCommand rootCommand)
         {
-            var option = new Option(new string[] { "--methodClassName", "-m" }, "The name of the static class that will contain the generated method bindings.")
-            {
-                Argument = new Argument("<className>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.ExactlyOne,
-                }
-            };
-            option.Argument.SetDefaultValue("Methods");
+            var option = new Option(
+                aliases: new string[] { "--methodClassName", "-m" },
+                description: "The name of the static class that will contain the generated method bindings.",
+                argumentType: typeof(string),
+                getDefaultValue: () => "Methods",
+                arity: ArgumentArity.ExactlyOne
+            );
 
             rootCommand.AddOption(option);
         }
 
         private static void AddNamespaceOption(RootCommand rootCommand)
         {
-            var option = new Option(new string[] { "--namespace", "-n" }, "The namespace in which to place the generated bindings.")
-            {
-                Argument = new Argument("<namespace>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.ExactlyOne,
-                }
-            };
-            option.Argument.SetDefaultValue(string.Empty);
-
-            rootCommand.AddOption(option);
-        }
-
-        private static void AddOutputOption(RootCommand rootCommand)
-        {
-            var option = new Option(new string[] { "--output", "-o" }, "The output location to write the generated bindings to.")
-            {
-                Argument = new Argument("<file>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.ExactlyOne,
-                }
-            };
-            option.Argument.SetDefaultValue(string.Empty);
-
-            rootCommand.AddOption(option);
-        }
-
-        private static void AddPrefixStripOption(RootCommand rootCommand)
-        {
-            var option = new Option(new string[] { "--prefixStrip", "-p" }, "The prefix to strip from the generated method bindings.")
-            {
-                Argument = new Argument("<prefix>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.ExactlyOne,
-                }
-            };
-            option.Argument.SetDefaultValue(string.Empty);
-
-            rootCommand.AddOption(option);
-        }
-
-        private static void AddRemapOption(RootCommand rootCommand)
-        {
-            var option = new Option(new string[] { "--remap", "-r" }, "A declaration name to be remapped to another name during binding generation.")
-            {
-                Argument = new Argument("<name>=<value>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.OneOrMore,
-                }
-            };
-            option.Argument.SetDefaultValue(Array.Empty<string>());
-
-            rootCommand.AddOption(option);
-        }
-
-        private static void AddStdOption(RootCommand rootCommand)
-        {
-            var option = new Option(new string[] { "--std", "-std" }, "Language standard to compile for.")
-            {
-                Argument = new Argument("<arg>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.ExactlyOne,
-                }
-            };
-            option.Argument.SetDefaultValue("c++17");
-
-            rootCommand.AddOption(option);
-        }
-
-        private static void AddTestOutputOption(RootCommand rootCommand)
-        {
-            var option = new Option(new string[] { "--test-output", "-to" }, "The output location to write the generated tests to.")
-            {
-                Argument = new Argument("<file>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.ExactlyOne,
-                }
-            };
-            option.Argument.SetDefaultValue(string.Empty);
-
-            rootCommand.AddOption(option);
-        }
-
-        private static void AddTraverseOption(RootCommand rootCommand)
-        {
-            var option = new Option(new string[] { "--traverse", "-t" }, "A file name included either directly or indirectly by -f that should be traversed during binding generation.")
-            {
-                Argument = new Argument("<name>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.OneOrMore,
-                }
-            };
-            option.Argument.SetDefaultValue(Array.Empty<string>());
-
-            rootCommand.AddOption(option);
-        }
-
-        private static void AddWithAttributeOption(RootCommand rootCommand)
-        {
-            var option = new Option(new string[] { "--with-attribute", "-wa" }, "An attribute to be added to the given remapped declaration name during binding generation.")
-            {
-                Argument = new Argument("<remapped-name>=<value>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.OneOrMore,
-                }
-            };
-            option.Argument.SetDefaultValue(Array.Empty<string>());
-
-            rootCommand.AddOption(option);
-        }
-
-        private static void AddWithCallConvOption(RootCommand rootCommand)
-        {
-            var option = new Option(new string[] { "--with-callconv", "-wcc" }, "A calling convention to be used for the given declaration during binding generation.")
-            {
-                Argument = new Argument("<remapped-name>=<value>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.OneOrMore,
-                }
-            };
-            option.Argument.SetDefaultValue(Array.Empty<string>());
-
-            rootCommand.AddOption(option);
-        }
-
-        private static void AddWithLibraryPathOption(RootCommand rootCommand)
-        {
-            var option = new Option(new string[] { "--with-librarypath", "-wlb" }, "A library path to be used for the given declaration during binding generation.")
-            {
-                Argument = new Argument("<remapped-name>=<value>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.OneOrMore,
-                }
-            };
-            option.Argument.SetDefaultValue(Array.Empty<string>());
-
-            rootCommand.AddOption(option);
-        }
-
-        private static void AddWithSetLastErrorOption(RootCommand rootCommand)
-        {
-            var option = new Option(new string[] { "--with-setlasterror", "-wsle" }, "Add the SetLastError=true modifier to a given DllImport or UnmanagedFunctionPointer.")
-            {
-                Argument = new Argument("<remapped-name>=<value>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.OneOrMore,
-                }
-            };
-            option.Argument.SetDefaultValue(Array.Empty<string>());
-
-            rootCommand.AddOption(option);
-        }
-
-        private static void AddWithTypeOption(RootCommand rootCommand)
-        {
-            var option = new Option(new string[] { "--with-type", "-wt" }, "A type to be used for the given enum declaration during binding generation.")
-            {
-                Argument = new Argument("<remapped-name>=<value>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.OneOrMore,
-                }
-            };
-            option.Argument.SetDefaultValue(Array.Empty<string>());
-
-            rootCommand.AddOption(option);
-        }
-
-        private static void AddWithUsingOption(RootCommand rootCommand)
-        {
-            var option = new Option(new string[] { "--with-using", "-wu" }, "A using directive to be included for the given remapped declaration name during binding generation.")
-            {
-                Argument = new Argument("<remapped-name>=<value>")
-                {
-                    ArgumentType = typeof(string),
-                    Arity = ArgumentArity.OneOrMore,
-                }
-            };
-            option.Argument.SetDefaultValue(Array.Empty<string>());
+            var option = new Option(
+                aliases: new string[] { "--namespace", "-n" },
+                description: "The namespace in which to place the generated bindings.",
+                argumentType: typeof(string),
+                getDefaultValue: () => string.Empty,
+                arity: ArgumentArity.ExactlyOne
+            );
 
             rootCommand.AddOption(option);
         }
 
         private static void AddOutputModeOption(RootCommand rootCommand)
         {
-            var option = new Option(new string[] { "--output-mode", "-om" }, "The mode describing how the information collected from the headers are presented in the resultant bindings.")
+            var option = new Option(
+                aliases: new string[] { "--output-mode", "-om" },
+                description: "The mode describing how the information collected from the headers are presented in the resultant bindings.",
+                argumentType: typeof(PInvokeGeneratorOutputMode),
+                getDefaultValue: () => PInvokeGeneratorOutputMode.CSharp,
+                arity: ArgumentArity.ExactlyOne
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddOutputOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--output", "-o" },
+                description: "The output location to write the generated bindings to.",
+                argumentType: typeof(string),
+                getDefaultValue: () => string.Empty,
+                arity: ArgumentArity.ExactlyOne
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddPrefixStripOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--prefixStrip", "-p" },
+                description: "The prefix to strip from the generated method bindings.",
+                argumentType: typeof(string),
+                getDefaultValue: () => string.Empty,
+                arity: ArgumentArity.ExactlyOne
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddRemapOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--remap", "-r" },
+                description: "A declaration name to be remapped to another name during binding generation.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddStdOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--std", "-std" },
+                description: "Language standard to compile for.",
+                argumentType: typeof(string),
+                getDefaultValue: () => "",
+                arity: ArgumentArity.ExactlyOne
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddTestOutputOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--test-output", "-to" },
+                description: "The output location to write the generated tests to.",
+                argumentType: typeof(string),
+                getDefaultValue: () => string.Empty,
+                arity: ArgumentArity.ExactlyOne
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddVersionOption(RootCommand rootCommand)
+        {
+            if (s_versionOption is null)
             {
-                Argument = new Argument("<arg>")
-                {
-                    ArgumentType = typeof(PInvokeGeneratorOutputMode),
-                    Arity = ArgumentArity.ExactlyOne
-                }
-            };
-            option.Argument.SetDefaultValue(PInvokeGeneratorOutputMode.CSharp);
+                s_versionOption = new Option(
+                    aliases: new string[] { "--version", "-v" },
+                    description: "Prints the current version information for the tool and its native dependencies.",
+                    arity: ArgumentArity.Zero
+                );
+            }
+            rootCommand.AddOption(s_versionOption);
+        }
+
+        private static void AddTraverseOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--traverse", "-t" },
+                description: "A file name included either directly or indirectly by -f that should be traversed during binding generation.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddWithAccessSpecifierOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--with-access-specifier", "-was" },
+                description: "An access specifier to be used with the given qualified or remapped declaration name during binding generation.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddWithAttributeOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--with-attribute", "-wa" },
+                description: "An attribute to be added to the given remapped declaration name during binding generation.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddWithCallConvOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--with-callconv", "-wcc" },
+                description: "A calling convention to be used for the given declaration during binding generation.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddWithClassOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--with-class", "-wc" },
+                description: "A class to be used for the given remapped constant or function declaration name during binding generation.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddWithLibraryPathOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--with-librarypath", "-wlb" },
+                description: "A library path to be used for the given declaration during binding generation.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddWithManualImportOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--with-manual-import", "-wmi" },
+                description: "A remapped function name to be treated as a manual import during binding generation.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddWithNamespaceOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--with-namespace", "-wn" },
+                description: "A namespace to be used for the given remapped declaration name during binding generation.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddWithSetLastErrorOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--with-setlasterror", "-wsle" },
+                description: "Add the SetLastError=true modifier or SetsSystemLastError attribute to a given DllImport or UnmanagedFunctionPointer.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddWithSuppressGCTransitionOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--with-suppressgctransition", "-wsgct" },
+                description: "Add the SuppressGCTransition calling convention to a given DllImport or UnmanagedFunctionPointer.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddWithTransparentStructOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--with-transparent-struct", "-wts" },
+                description: "A remapped type name to be treated as a transparent wrapper during binding generation.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddWithTypeOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--with-type", "-wt" },
+                description: "A type to be used for the given enum declaration during binding generation.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddWithUsingOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--with-using", "-wu" },
+                description: "A using directive to be included for the given remapped declaration name during binding generation.",
+                argumentType: typeof(string),
+                getDefaultValue: Array.Empty<string>,
+                arity: ArgumentArity.OneOrMore
+            );
 
             rootCommand.AddOption(option);
         }

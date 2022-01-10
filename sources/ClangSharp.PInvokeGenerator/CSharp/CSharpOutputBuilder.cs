@@ -1,7 +1,8 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Text;
 
 namespace ClangSharp.CSharp
@@ -11,6 +12,7 @@ namespace ClangSharp.CSharp
         public const string DefaultIndentationString = "    ";
 
         private readonly string _name;
+        private readonly PInvokeGeneratorConfiguration _config;
         private readonly List<string> _contents;
         private readonly StringBuilder _currentLine;
         private readonly SortedSet<string> _usingDirectives;
@@ -19,14 +21,16 @@ namespace ClangSharp.CSharp
         private readonly bool _isTestOutput;
 
         private int _indentationLevel;
+        private bool _isInMarkerInterface;
         private readonly MarkerMode _markerMode;
         private readonly bool _writeSourceLocation;
 
-        public CSharpOutputBuilder(string name, string indentationString = DefaultIndentationString,
+        public CSharpOutputBuilder(string name, PInvokeGeneratorConfiguration config, string indentationString = DefaultIndentationString,
                                    bool isTestOutput = false, MarkerMode markerMode = MarkerMode.None,
                                    bool writeSourceLocation = false)
         {
             _name = name;
+            _config = config;
             _contents = new List<string>();
             _currentLine = new StringBuilder();
             _usingDirectives = new SortedSet<string>();
@@ -42,6 +46,8 @@ namespace ClangSharp.CSharp
         public bool HasPendingLine => _currentLine.Length > 0;
 
         public string IndentationString => _indentationString;
+
+        public bool IsUncheckedContext { get; private set; }
 
         public bool IsTestOutput => _isTestOutput;
 
@@ -61,11 +67,7 @@ namespace ClangSharp.CSharp
 
         public void DecreaseIndentation()
         {
-            if (_indentationLevel == 0)
-            {
-                throw new InvalidOperationException();
-            }
-
+            Debug.Assert(_indentationLevel > 0);
             _indentationLevel--;
         }
 
@@ -154,6 +156,21 @@ namespace ClangSharp.CSharp
             if (NeedsSemicolon)
             {
                 WriteSemicolon();
+            }
+        }
+
+        public void WriteValueAsBytes(ulong value, int sizeInChars)
+        {
+            Write("0x");
+            Write(((byte)value).ToString("X2"));
+
+            for (var i = 1; i < sizeInChars; i++)
+            {
+                Write(", ");
+                value >>= 8;
+
+                Write("0x");
+                Write(((byte)value).ToString("X2"));
             }
         }
 

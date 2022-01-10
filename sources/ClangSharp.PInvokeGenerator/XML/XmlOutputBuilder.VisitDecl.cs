@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft and Contributors. All rights reserved. Licensed under the University of Illinois/NCSA Open Source License. See LICENSE.txt in the project root for license information.
+// Copyright (c) .NET Foundation and Contributors. All Rights Reserved. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -18,32 +18,57 @@ namespace ClangSharp.XML
         public void WriteCastType(string targetTypeName) => _sb.Append(targetTypeName);
         public void EndInnerCast() => _sb.Append("</cast>");
 
-        public void BeginUnchecked() => _sb.Append("<unchecked>");
-        public void EndUnchecked() => _sb.Append("</unchecked>");
-
-        public void BeginConstant(in ConstantDesc desc)
+        public void BeginUnchecked()
         {
-            _ = _sb.Append((desc.Kind & ConstantKind.Enumerator) == 0
-                ? $"<constant name=\"{desc.EscapedName}\" access=\"{desc.AccessSpecifier.AsString()}\">"
-                : $"<enumerator name=\"{desc.EscapedName}\" access=\"{desc.AccessSpecifier.AsString()}\">");
-            _ = _sb.Append($"<type primitive=\"{(desc.Kind & ConstantKind.PrimitiveConstant) != 0}\">");
-            _ = _sb.Append(EscapeText(desc.TypeName));
-            _ = _sb.Append("</type>");
+            Debug.Assert(!IsUncheckedContext);
+            _ = _sb.Append("<unchecked>");
+            IsUncheckedContext = true;
         }
 
-        public void BeginConstantValue(bool isGetOnlyProperty = false) => _sb.Append("<value>");
+        public void EndUnchecked()
+        {
+            Debug.Assert(IsUncheckedContext);
+            _ = _sb.Append("</unchecked>");
+            IsUncheckedContext = false;
+        }
+
+        public void BeginValue(in ValueDesc desc)
+        {
+            _ = _sb.Append((desc.Kind != ValueKind.Enumerator)
+                ? $"<constant name=\"{desc.EscapedName}\" access=\"{desc.AccessSpecifier.AsString()}\">"
+                : $"<enumerator name=\"{desc.EscapedName}\" access=\"{desc.AccessSpecifier.AsString()}\">");
+            desc.WriteCustomAttrs?.Invoke(desc.CustomAttrGeneratorData);
+            _ = _sb.Append($"<type primitive=\"{desc.Kind == ValueKind.Primitive}\">");
+            _ = _sb.Append(EscapeText(desc.TypeName));
+            _ = _sb.Append("</type>");
+
+            if (desc.HasInitializer)
+            {
+                _ = _sb.Append("<value>");
+            }
+        }
+
         public void WriteConstantValue(long value) => _sb.Append(value);
         public void WriteConstantValue(ulong value) => _sb.Append(value);
-        public void EndConstantValue() => _sb.Append("</value>");
-        public void EndConstant(bool isConstant) => _sb.Append(isConstant ? "</constant>" : "</enumerator>");
+
+        public void EndValue(in ValueDesc desc)
+        {
+            if (desc.HasInitializer)
+            {
+                _ = _sb.Append("</value>");
+            }
+
+            _ = _sb.Append((desc.Kind != ValueKind.Enumerator) ? "</constant>" : "</enumerator>");
+        }
 
         public void BeginEnum(in EnumDesc desc)
         {
             _ = _sb.Append($"<enumeration name=\"{desc.EscapedName}\" access=\"{desc.AccessSpecifier.AsString()}\">");
+            desc.WriteCustomAttrs?.Invoke(desc.CustomAttrGeneratorData);
             _ = _sb.Append($"<type>{desc.TypeName}</type>");
         }
 
-        public void EndEnum() => _sb.Append("</enumeration>");
+        public void EndEnum(in EnumDesc desc) => _sb.Append("</enumeration>");
 
         public void BeginField(in FieldDesc desc)
         {
@@ -59,6 +84,7 @@ namespace ClangSharp.XML
             }
 
             _ = _sb.Append('>');
+            desc.WriteCustomAttrs?.Invoke(desc.CustomAttrGeneratorData);
             _ = _sb.Append("<type");
 
             if (!string.IsNullOrWhiteSpace(desc.NativeTypeName))
@@ -75,9 +101,8 @@ namespace ClangSharp.XML
 
         public void WriteRegularField(string typeName, string escapedName)
             => _sb.Append($">{EscapeText(typeName)}</type>");
-        public void EndField(bool isBodyless = true) => _sb.Append("</field>");
-        public void BeginFunctionOrDelegate<TCustomAttrGeneratorData>(
-            in FunctionOrDelegateDesc<TCustomAttrGeneratorData> desc, ref bool isMethodClassUnsafe)
+        public void EndField(in FieldDesc desc) => _sb.Append("</field>");
+        public void BeginFunctionOrDelegate(in FunctionOrDelegateDesc desc, ref bool isMethodClassUnsafe)
         {
             if (desc.IsVirtual)
             {
@@ -131,7 +156,7 @@ namespace ClangSharp.XML
 
             _ = _sb.Append('>');
 
-            desc.WriteCustomAttrs(desc.CustomAttrGeneratorData);
+            desc.WriteCustomAttrs?.Invoke(desc.CustomAttrGeneratorData);
 
             _ = _sb.Append("<type");
             if (!string.IsNullOrWhiteSpace(desc.NativeTypeName))
@@ -142,23 +167,19 @@ namespace ClangSharp.XML
             }
 
             _ = _sb.Append('>');
-        }
-
-        public void WriteReturnType(string typeString)
-        {
-            _ = _sb.Append(EscapeText(typeString));
+            _ = _sb.Append(EscapeText(desc.ReturnType));
             _ = _sb.Append("</type>");
         }
 
-        public void BeginFunctionInnerPrototype(string escapedName)
+        public void BeginFunctionInnerPrototype(in FunctionOrDelegateDesc info)
         {
             // nop, only used in C#
         }
 
-        public void BeginParameter<TCustomAttrGeneratorData>(in ParameterDesc<TCustomAttrGeneratorData> info)
+        public void BeginParameter(in ParameterDesc info)
         {
             _ = _sb.Append($"<param name=\"{info.Name}\">");
-            info.WriteCustomAttrs(info.CustomAttrGeneratorData);
+            info.WriteCustomAttrs?.Invoke(info.CustomAttrGeneratorData);
             _ = _sb.Append("<type>");
             _ = _sb.Append(EscapeText(info.Type));
             _ = _sb.Append("</type>");
@@ -168,14 +189,14 @@ namespace ClangSharp.XML
 
         public void EndParameterDefault() => _ = _sb.Append("</init>");
 
-        public void EndParameter() => _ = _sb.Append("</param>");
+        public void EndParameter(in ParameterDesc info) => _ = _sb.Append("</param>");
 
         public void WriteParameterSeparator()
         {
             // nop, used only in C#
         }
 
-        public void EndFunctionInnerPrototype()
+        public void EndFunctionInnerPrototype(in FunctionOrDelegateDesc info)
         {
             // nop, used only in C#
         }
@@ -211,10 +232,10 @@ namespace ClangSharp.XML
             // nop, used only by C#
         }
 
-        public void EndFunctionOrDelegate(bool isVirtual, bool _)
-            => _sb.Append(isVirtual ? "</delegate>" : "</function>");
+        public void EndFunctionOrDelegate(in FunctionOrDelegateDesc desc)
+            => _sb.Append(desc.IsVirtual ? "</delegate>" : "</function>");
 
-        public void BeginStruct<TCustomAttrGeneratorData>(in StructDesc<TCustomAttrGeneratorData> info)
+        public void BeginStruct(in StructDesc info)
         {
             _ = _sb.Append("<struct name=\"");
             _ = _sb.Append(info.EscapedName);
@@ -252,27 +273,29 @@ namespace ClangSharp.XML
                 _ = _sb.Append(" unsafe=\"true\"");
             }
 
-            if (info.Layout is not null)
+            if (info.LayoutAttribute is not null)
             {
                 _ = _sb.Append(" layout=\"");
-                _ = _sb.Append(info.Layout.Value);
+                _ = _sb.Append(info.LayoutAttribute.Value);
                 _ = _sb.Append('"');
-                if (info.Layout.Pack != default)
+
+                if (info.LayoutAttribute.Pack != 0)
                 {
                     _ = _sb.Append(" pack=\"");
-                    _ = _sb.Append(info.Layout.Pack);
+                    _ = _sb.Append(info.LayoutAttribute.Pack);
                     _ = _sb.Append('"');
                 }
             }
 
             _ = _sb.Append('>');
-            info.WriteCustomAttrs(info.CustomAttrGeneratorData);
+            info.WriteCustomAttrs?.Invoke(info.CustomAttrGeneratorData);
         }
-
+        public void BeginMarkerInterface(string[] baseTypeNames) => _sb.Append("<interface>");
+        public void EndMarkerInterface() => _sb.Append("</interface>");
         public void BeginExplicitVtbl() => _sb.Append("<vtbl>");
         public void EndExplicitVtbl() => _sb.Append("</vtbl>");
 
-        public void EndStruct() => _sb.Append("</struct>");
+        public void EndStruct(in StructDesc info) => _sb.Append("</struct>");
 
         public void EmitCompatibleCodeSupport()
         {
@@ -292,7 +315,7 @@ namespace ClangSharp.XML
         public CSharpOutputBuilder BeginCSharpCode()
         {
             _ = _sb.Append("<code>");
-            return new CSharpOutputBuilder("__Internal", markerMode: MarkerMode.Xml);
+            return new CSharpOutputBuilder("__Internal", _config, markerMode: MarkerMode.Xml);
         }
 
         public void EndCSharpCode(CSharpOutputBuilder output)
