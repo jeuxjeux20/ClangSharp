@@ -42,7 +42,7 @@ namespace ClangSharp
             {
                 PInvokeGeneratorOutputMode.CSharp => (IOutputBuilder) new CSharpOutputBuilder(name, writeSourceLocation: _writeSourceLocation),
                 PInvokeGeneratorOutputMode.Xml => new XmlOutputBuilder(name),
-                PInvokeGeneratorOutputMode.JniGlue => new JniGlueOutputBuilder2(name, _namespace, _methodClassName),
+                PInvokeGeneratorOutputMode.JniGlue => new JniGlueOutputBuilder(name, _namespace, _methodClassName),
                 PInvokeGeneratorOutputMode.JavaClasses => new JavaClassesOutputBuilder(name, _namespace, _methodClassName),
                 _ => throw new InvalidOperationException()
             };

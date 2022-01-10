@@ -128,7 +128,7 @@ namespace ClangSharp
                     else if (outputBuilder is XmlOutputBuilder xmlOutputBuilder)
                     {
                         hasAnyContents = xmlOutputBuilder.Contents.Any();
-                    } else if (outputBuilder is JniGlueOutputBuilder2)
+                    } else if (outputBuilder is JniGlueOutputBuilder)
                     {
                         hasAnyContents = true; // TODO: Something more efficient?
                     } else if (outputBuilder is JavaClassesOutputBuilder)
@@ -458,7 +458,7 @@ namespace ClangSharp
             else if (outputBuilder is XmlOutputBuilder xmlOutputBuilder)
             {
                 ForXml(xmlOutputBuilder);
-            } else if (outputBuilder is JniGlueOutputBuilder2 jniGlueOutputBuilder)
+            } else if (outputBuilder is JniGlueOutputBuilder jniGlueOutputBuilder)
             {
                 ForJniGlue(jniGlueOutputBuilder);
             } else if (outputBuilder is JavaClassesOutputBuilder javaClassesOutputBuilder)
@@ -591,7 +591,7 @@ namespace ClangSharp
                 }
             }
 
-            void ForJniGlue(JniGlueOutputBuilder2 jniGlueOutputBuilder)
+            void ForJniGlue(JniGlueOutputBuilder jniGlueOutputBuilder)
             {
                 // Am I doing this wrong? Yes.
                 jniGlueOutputBuilder.IncreaseIndentation();

@@ -250,7 +250,7 @@ namespace ClangSharp.JNI.Java
                     => $"{passStruct.JavaStructName}.getTrackedAndOwned({passStruct.ValueToPass})",
 
                 PassStringAsJByteArrayToCharPtr passString
-                    => $"new String({passString.ValueToPass})",
+                    => $"{passString.ValueToPass} == null ? null : new String({passString.ValueToPass})",
 
                 PassStringDeletionEnumAsBool
                     => throw UnsupportedPass("Cannot pass a StringDeletionEnum to Java.", pass),

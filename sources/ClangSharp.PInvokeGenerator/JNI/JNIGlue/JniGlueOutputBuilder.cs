@@ -9,9 +9,9 @@ using ClangSharp.JNI.Java;
 
 namespace ClangSharp.JNI.JNIGlue
 {
-    internal sealed class JniGlueOutputBuilder2 : JniOutputBuilderBase
+    internal sealed class JniGlueOutputBuilder : JniOutputBuilderBase
     {
-        public JniGlueOutputBuilder2(string name, string @namespace,
+        public JniGlueOutputBuilder(string name, string @namespace,
             string container,
             string indentationString = DefaultIndentationString) : base(name,
             indentationString, @namespace, container)
@@ -235,7 +235,7 @@ namespace ClangSharp.JNI.JNIGlue
 
             var method = upstreamMethod.ReturnType switch {
                 { Kind: JavaTypeKind.Void } => "CallStaticVoidMethod",
-                { Kind: JavaTypeKind.Object } or { Kind: JavaTypeKind.Array } => "CallStaticObjectMethod",
+                { Kind: JavaTypeKind.Object or JavaTypeKind.Array } => "CallStaticObjectMethod",
                 { Kind: JavaTypeKind.Boolean } => "CallStaticBoolMethod",
                 { Kind: JavaTypeKind.Byte } => "CallStaticByteMethod",
                 { Kind: JavaTypeKind.Char } => "CallStaticCharMethod",
