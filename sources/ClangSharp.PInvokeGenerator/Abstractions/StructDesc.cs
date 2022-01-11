@@ -17,6 +17,7 @@ namespace ClangSharp.Abstractions
         public Guid? Uuid { get; set; }
         public StructFlags Flags { get; set; }
         public CXSourceLocation? Location { get; set; }
+        public bool IsComplete { get; set; } // TODO: Flags instead
 
         public bool IsNested
         {

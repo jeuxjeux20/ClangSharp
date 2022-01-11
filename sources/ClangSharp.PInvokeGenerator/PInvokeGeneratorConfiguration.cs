@@ -22,6 +22,7 @@ namespace ClangSharp
         private readonly PInvokeGeneratorOutputMode _outputMode;
 
         private readonly string _defaultClass;
+        private readonly string _methodClassName;
         private readonly string _methodPrefixToStrip;
         private readonly string _testOutputLocation;
 
@@ -292,6 +293,18 @@ namespace ClangSharp
             init
             {
                 _methodPrefixToStrip = string.IsNullOrWhiteSpace(value) ? DefaultMethodPrefixToStripValue : value;
+            }
+        }
+
+        public string MethodClassName
+        {
+            get
+            {
+                return _methodClassName;
+            }
+            init
+            {
+                _methodClassName = string.IsNullOrWhiteSpace(value) ? null : value;
             }
         }
 

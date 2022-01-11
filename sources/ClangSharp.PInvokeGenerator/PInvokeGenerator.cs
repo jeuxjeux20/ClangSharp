@@ -248,7 +248,7 @@ namespace ClangSharp
                             sw.WriteLine(_config.HeaderText);
                         }
 
-                        var includeGuardName = $"FUMOCEMENT_GLUE_{_config.Namespace.ToUpper().Replace(".", "_")}";
+                        var includeGuardName = $"FUMOCEMENT_GLUE_{_config.DefaultNamespace.ToUpper().Replace(".", "_")}";
                         sw.WriteLine($"#ifndef {includeGuardName}");
                         sw.WriteLine($"#define {includeGuardName}");
                         sw.WriteLine("#pragma warning(push, 0)");
@@ -266,7 +266,7 @@ namespace ClangSharp
                         {
                             sw.WriteLine(_config.HeaderText);
                         }
-                        sw.WriteLine($"package {_config.Namespace};");
+                        sw.WriteLine($"package {_config.DefaultNamespace};");
                         sw.WriteLine();
                         sw.WriteLine("import com.github.novelrt.fumocement.*;");
                         sw.WriteLine("import java.nio.charset.*;");

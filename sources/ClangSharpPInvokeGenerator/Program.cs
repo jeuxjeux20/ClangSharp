@@ -565,6 +565,7 @@ namespace ClangSharp
                 IncludedNames = includedNames,
                 LibraryPath = libraryPath,
                 MethodPrefixToStrip = methodPrefixToStrip,
+                MethodClassName = methodClassName,
                 RemappedNames = remappedNames,
                 TraversalNames = traversalNames,
                 TestOutputLocation = testOutputLocation,

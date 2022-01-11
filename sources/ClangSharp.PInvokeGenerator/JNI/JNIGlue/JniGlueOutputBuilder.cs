@@ -11,10 +11,10 @@ namespace ClangSharp.JNI.JNIGlue
 {
     internal sealed class JniGlueOutputBuilder : JniOutputBuilderBase
     {
-        public JniGlueOutputBuilder(string name, string @namespace,
-            string container,
+        public JniGlueOutputBuilder(string name,
+            PInvokeGeneratorConfiguration configuration,
             string indentationString = DefaultIndentationString) : base(name,
-            indentationString, @namespace, container)
+            configuration, indentationString)
         {
         }
 

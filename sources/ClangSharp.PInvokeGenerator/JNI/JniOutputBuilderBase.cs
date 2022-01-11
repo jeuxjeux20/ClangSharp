@@ -2,12 +2,9 @@
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
 using ClangSharp.Abstractions;
 using ClangSharp.CSharp;
-using ClangSharp.Interop;
 using ClangSharp.JNI.Java;
 
 namespace ClangSharp.JNI
@@ -21,19 +18,23 @@ namespace ClangSharp.JNI
         protected BraceStyle CurrentBraceStyle { get; set; } = BraceStyle.Allman;
         protected StringBuilder ContentStringBuilder { get; } = new();
         private int _indentationLevel = new();
+        private readonly PInvokeGeneratorConfiguration _configuration;
         private readonly string _indentationString;
 
         private PreliminaryEnum _preliminaryEnum;
         private PreliminaryFunction _preliminaryFunction;
         private PreliminaryStruct _preliminaryStruct;
 
-        protected JniOutputBuilderBase(string name, string indentationString,
-            string @namespace, string container)
+        public bool IsUncheckedContext => true;
+
+        protected JniOutputBuilderBase(string name, PInvokeGeneratorConfiguration configuration,
+            string indentationString)
         {
             Name = name;
+            _configuration = configuration;
             _indentationString = indentationString;
-            Namespace = @namespace;
-            CurrentGenerationPlan = new JniGenerationPlan { ContainerClass = container, Package = Namespace };
+            Namespace = configuration.DefaultNamespace;
+            CurrentGenerationPlan = new JniGenerationPlan { ContainerClass = configuration.MethodClassName, Package = Namespace };
         }
 
         protected static UnsupportedJniScenarioException UnsupportedType<T>(T type)
@@ -163,18 +164,13 @@ namespace ClangSharp.JNI
             // nop, send help ;_;
         }
 
-        public virtual void BeginConstant(in ConstantDesc desc)
+        public void BeginValue(in ValueDesc desc)
         {
-            if (_preliminaryEnum != null)
+            if (desc.IsConstant && _preliminaryEnum != null)
             {
                 _preliminaryEnum.PreliminaryConstant =
                     new PreliminaryEnumConstant(JavaConventions.EscapeName(desc.EscapedName));
             }
-        }
-
-        public virtual void BeginConstantValue(bool isGetOnlyProperty = false)
-        {
-            // nop, send help ;_;
         }
 
         public virtual void WriteConstantValue(long value)
@@ -185,6 +181,11 @@ namespace ClangSharp.JNI
         public virtual void WriteConstantValue(ulong value)
         {
             _preliminaryEnum?.CommitUnsignedPreliminaryConstant(value);
+        }
+
+        public void EndValue(in ValueDesc desc)
+        {
+            // nop!
         }
 
         public virtual void EndConstantValue()
@@ -202,7 +203,7 @@ namespace ClangSharp.JNI
             _preliminaryEnum = new PreliminaryEnum { JavaName = JavaConventions.EscapeName(desc.EscapedName) };
         }
 
-        public virtual void EndEnum()
+        public virtual void EndEnum(in EnumDesc desc)
         {
             CurrentGenerationPlan.Enums.Add(
                 new EnumGenerationInfo(_preliminaryEnum.JavaName, _preliminaryEnum.Constants));
@@ -267,36 +268,17 @@ namespace ClangSharp.JNI
         {
         }
 
-        public virtual void EndField(bool isBodyless = true)
+        public void EndField(in FieldDesc desc)
         {
+
         }
 
-        public virtual void BeginFunctionOrDelegate<TCustomAttrGeneratorData>(
-            in FunctionOrDelegateDesc<TCustomAttrGeneratorData> info, ref bool isMethodClassUnsafe)
+        public void BeginFunctionInnerPrototype(in FunctionOrDelegateDesc info)
         {
-            if (info.CanonicalNativeType is not FunctionProtoTypeDesc canonicalType)
-            {
-                Console.WriteLine("Unsupported function type: " + info.NativeTypeName + $" ({info.EscapedName})");
-                return;
-            }
 
-            _preliminaryFunction = new PreliminaryFunction {
-                NativeName = info.EscapedName,
-                JavaName = JavaConventions.EscapeName(info.EscapedName), // TODO: remove escape
-                ReturnType = canonicalType.ReturnType
-            };
         }
 
-        public virtual void WriteReturnType(string typeString)
-        {
-        }
-
-        public virtual void BeginFunctionInnerPrototype(string escapedName)
-        {
-            // nop, send help ;_;
-        }
-
-        public virtual void BeginParameter<TCustomAttrGeneratorData>(in ParameterDesc<TCustomAttrGeneratorData> info)
+        public void BeginParameter(in ParameterDesc info)
         {
             if (_preliminaryFunction is null)
             {
@@ -317,6 +299,26 @@ namespace ClangSharp.JNI
             ));
         }
 
+        public virtual void BeginFunctionOrDelegate(in FunctionOrDelegateDesc info, ref bool isMethodClassUnsafe)
+        {
+            if (info.CanonicalNativeType is not FunctionProtoTypeDesc canonicalType)
+            {
+                Console.WriteLine("Unsupported function type: " + info.NativeTypeName + $" ({info.EscapedName})");
+                return;
+            }
+
+            _preliminaryFunction = new PreliminaryFunction {
+                NativeName = info.EscapedName,
+                JavaName = JavaConventions.EscapeName(info.EscapedName), // TODO: remove escape
+                ReturnType = canonicalType.ReturnType
+            };
+        }
+
+        public virtual void EndParameter(in ParameterDesc info)
+        {
+
+        }
+
         public virtual void BeginParameterDefault()
         {
             // nop, send help ;_;
@@ -327,19 +329,14 @@ namespace ClangSharp.JNI
             // nop, send help ;_;
         }
 
-        public virtual void EndParameter()
-        {
-            // nop, send help ;_;
-        }
-
         public virtual void WriteParameterSeparator()
         {
             // nop, send help ;_;
         }
 
-        public virtual void EndFunctionInnerPrototype()
+        public void EndFunctionInnerPrototype(in FunctionOrDelegateDesc info)
         {
-            // nop, send help ;_;
+            // nop!
         }
 
         public virtual void BeginConstructorInitializer(string memberRefName, string memberInitName)
@@ -382,7 +379,7 @@ namespace ClangSharp.JNI
             // nop, send help ;_;
         }
 
-        public virtual void EndFunctionOrDelegate(bool isVirtual, bool isBodyless)
+        public void EndFunctionOrDelegate(in FunctionOrDelegateDesc info)
         {
             if (_preliminaryFunction is null)
             {
@@ -408,7 +405,7 @@ namespace ClangSharp.JNI
             _preliminaryFunction = null;
         }
 
-        public virtual void BeginStruct<TCustomAttrGeneratorData>(in StructDesc<TCustomAttrGeneratorData> info)
+        public virtual void BeginStruct(in StructDesc info)
         {
             if (info.IsComplete)
             {
@@ -417,6 +414,16 @@ namespace ClangSharp.JNI
                 _preliminaryStruct =
                     new PreliminaryStruct(javaName, CurrentGenerationPlan.StructTypeInContainer(javaName));
             }
+        }
+
+        public void BeginMarkerInterface(string[] baseTypeNames)
+        {
+            // nop!
+        }
+
+        public void EndMarkerInterface()
+        {
+            // nop!
         }
 
         public virtual void BeginExplicitVtbl()
@@ -429,7 +436,7 @@ namespace ClangSharp.JNI
             // nop, send help ;_;
         }
 
-        public virtual void EndStruct()
+        public void EndStruct(in StructDesc info)
         {
             if (_preliminaryStruct is null)
             {
@@ -459,7 +466,7 @@ namespace ClangSharp.JNI
 
         public CSharpOutputBuilder BeginCSharpCode()
         {
-            return new("Whatever");
+            return new("Whatever", _configuration);
         }
 
         public virtual void EndCSharpCode(CSharpOutputBuilder output)
@@ -530,6 +537,16 @@ namespace ClangSharp.JNI
         public virtual void SuppressDivider()
         {
             // nop, send help ;_;
+        }
+
+        public void WriteCustomAttribute(string attribute, Action callback)
+        {
+            // nop!
+        }
+
+        public void WriteIid(string name, Guid value)
+        {
+            // nop!
         }
 
         public virtual void WriteCustomAttribute(string attribute)

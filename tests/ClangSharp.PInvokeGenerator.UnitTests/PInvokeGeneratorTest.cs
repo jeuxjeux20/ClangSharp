@@ -78,6 +78,7 @@ namespace ClangSharp.UnitTests
                 IncludedNames = null,
                 LibraryPath = libraryPath,
                 MethodPrefixToStrip = null,
+                MethodClassName = null,
                 RemappedNames = remappedNames,
                 TraversalNames = null,
                 TestOutputLocation = null,

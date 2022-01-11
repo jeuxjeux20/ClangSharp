@@ -11,10 +11,9 @@ namespace ClangSharp.JNI.Java
 {
     internal class JavaClassesOutputBuilder : JniOutputBuilderBase
     {
-        public JavaClassesOutputBuilder(string name, string @namespace,
-            string container,
-            string indentationString = DefaultIndentationString) : base(name,
-            indentationString, @namespace, container)
+        public JavaClassesOutputBuilder(string name, PInvokeGeneratorConfiguration configuration,
+        string indentationString = DefaultIndentationString) : base(name, configuration,
+            indentationString)
         {
             CurrentBraceStyle = BraceStyle.KAndR;
         }
