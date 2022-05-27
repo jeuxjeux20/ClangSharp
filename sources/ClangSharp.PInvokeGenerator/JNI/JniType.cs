@@ -2,8 +2,11 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
+using ClangSharp.Abstractions;
 using ClangSharp.JNI.Java;
 
+#nullable enable
 namespace ClangSharp.JNI
 {
     internal readonly struct JniType : IEquatable<JniType>
@@ -36,7 +39,10 @@ namespace ClangSharp.JNI
 
         public static readonly JniType JThrowable = new("jthrowable");
 
-        public JniType(string value)
+        public static readonly JniType JClassId = new("jclassID");
+        public static readonly JniType JMethodId = new("jmethodID");
+
+        private JniType(string value)
         {
             Value = value;
         }
@@ -57,7 +63,6 @@ namespace ClangSharp.JNI
             [JLong] = JavaType.Long,
             [JFloat] = JavaType.Float,
             [JDouble] = JavaType.Double,
-
             [JObjectArray] = JavaType.ObjectArray,
             [JBooleanArray] = JavaType.BooleanArray,
             [JByteArray] = JavaType.ByteArray,
@@ -67,10 +72,10 @@ namespace ClangSharp.JNI
             [JLongArray] = JavaType.LongArray,
             [JFloatArray] = JavaType.FloatArray,
             [JDoubleArray] = JavaType.DoubleArray,
-
             [JClass] = JavaType.Class,
             [JString] = JavaType.String,
         };
+
         public JavaType AsJavaNonObject()
         {
             if (!s_jniToJava.TryGetValue(this, out var javaType))
@@ -81,10 +86,18 @@ namespace ClangSharp.JNI
             return javaType;
         }
 
+        public JavaType? AsJava()
+        {
+            return s_jniToJava.GetValueOrDefault(this);
+        }
+
+        // RecordTypeDesc isn't the best type to use, but being precise doesn't really matter here.
+        public TypeDesc AsNative() => new RecordTypeDesc(Value);
+
         public bool Equals(JniType other)
             => string.Equals(Value, other.Value, StringComparison.InvariantCulture);
 
-        public override bool Equals(object obj) => obj is JniType other && Equals(other);
+        public override bool Equals(object? obj) => obj is JniType other && Equals(other);
 
         public override int GetHashCode() => (Value != null ? StringComparer.InvariantCulture.GetHashCode(Value) : 0);
 

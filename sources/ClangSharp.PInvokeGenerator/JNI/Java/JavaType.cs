@@ -1,10 +1,9 @@
 ﻿// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-
+#nullable enable
 namespace ClangSharp.JNI.Java
 {
     internal abstract class JavaType
@@ -108,7 +107,7 @@ namespace ClangSharp.JNI.Java
     {
         private readonly string[] _genericParameters;
 
-        public ObjectJavaType(string package, string name, IEnumerable<string> genericParameters = null)
+        public ObjectJavaType(string package, string name, IEnumerable<string>? genericParameters = null)
         {
             Package = package;
             Name = name;

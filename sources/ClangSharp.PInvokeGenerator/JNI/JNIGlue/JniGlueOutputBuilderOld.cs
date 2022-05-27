@@ -5,17 +5,13 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using ClangSharp.JNI.Generation.FunctionPointer;
-using ClangSharp.JNI.Generation.Method;
-using ClangSharp.JNI.Generation.Struct;
-using ClangSharp.JNI.Generation.Transitions;
 using ClangSharp.JNI.Java;
 
 namespace ClangSharp.JNI.JNIGlue
 {
-    internal sealed class JniGlueOutputBuilder : JniOutputBuilderBase
+    internal sealed class JniGlueOutputBuilderOld : JniOutputBuilderBaseOld
     {
-        public JniGlueOutputBuilder(string name,
+        public JniGlueOutputBuilderOld(string name,
             PInvokeGeneratorConfiguration configuration,
             string indentationString = DefaultIndentationString) : base(name,
             configuration, indentationString)
@@ -27,108 +23,148 @@ namespace ClangSharp.JNI.JNIGlue
 
         protected override void WriteContent()
         {
-            foreach (var structUnit in GenerationContext.GetTransformationUnits<StructTransformationUnit>())
+            foreach (var @struct in CurrentGenerationPlan.Structs)
             {
-                var @struct = structUnit.Target;
                 WriteIndentedLine($"// Struct declaration: {@struct.NativeName}");
 
-                WriteStructClassMethods(structUnit.ClassGenerationUnit);
+                WriteAllocateStructMethod(@struct);
+                WriteDestroyStructMethod(@struct);
+                WriteOverwriteMethod(@struct);
 
-                foreach (var fieldAccessor in structUnit.FieldAccessorGenerationUnits)
+                foreach (var structField in @struct.Fields)
                 {
-                    WriteMethod(fieldAccessor);
+                    WriteStructFieldGetter(@struct, structField);
+                    WriteStructFieldSetter(@struct, structField);
                 }
 
                 WriteIndentedLine($"// End struct declaration: {@struct.NativeName}");
             }
 
-            foreach (var method in GenerationContext.GetTransformationUnits<MethodTransformationUnit>())
+            foreach (var method in CurrentGenerationPlan.Methods)
             {
-                WriteMethod(method.MethodGenerationUnit);
+                WriteMethod(method);
             }
         }
 
-        private void WriteStructClassMethods(StructClassGenerationUnit structGen)
-        {
-            WriteAllocateStructMethod(structGen);
-            WriteDestroyStructMethod(structGen);
-            WriteOverwriteMethod(structGen);
-        }
-
-        private void WriteAllocateStructMethod(StructClassGenerationUnit structGen)
+        private void WriteAllocateStructMethod(StructGenerationInfo @struct)
         {
             BeginJniMethod(JniType.JLong,
-                JavaConventions.JniProxyMethodName(structGen.JavaStructType,
-                    StructClassGenerationUnit.AllocateStructMethodName),
+                @struct.JavaType.RawName,
+                @struct.AllocateStructMethodName,
                 true,
                 Array.Empty<MethodParameter<JniType>>());
 
-            WriteIndentedLine($"return FumoCement::toJavaPointer(new {structGen.NativeName});");
+            WriteIndentedLine($"return FumoCement::toJavaPointer(new {@struct.NativeName});");
 
             EndJniMethod();
         }
 
-        private void WriteDestroyStructMethod(StructClassGenerationUnit structGen)
+        private void WriteDestroyStructMethod(StructGenerationInfo @struct)
         {
             BeginJniMethod(JniType.Void,
-                JavaConventions.JniProxyMethodName(structGen.JavaStructType,
-                    StructClassGenerationUnit.DestroyStructMethodName),
+                @struct.JavaType.RawName,
+                @struct.DestroyStructMethodName,
                 true,
                 new MethodParameter<JniType>[] { new(JniType.JLong, "handle") });
 
-            WriteIndentedLine($"delete FumoCement::toNativePointer<{structGen.NativeName}>(handle);");
+            WriteIndentedLine($"delete FumoCement::toNativePointer<{@struct.NativeName}>(handle);");
 
             EndJniMethod();
         }
 
-        private void WriteOverwriteMethod(StructClassGenerationUnit structGen)
+        private void WriteOverwriteMethod(StructGenerationInfo @struct)
         {
             BeginJniMethod(JniType.Void,
-                JavaConventions.JniProxyMethodName(structGen.JavaStructType,
-                    StructClassGenerationUnit.OverwriteMethodName),
+                @struct.JavaType.RawName,
+                @struct.OverwriteMethodName,
                 true,
                 new MethodParameter<JniType>[] {
-                    new(JniType.JLong, "targetHandle"), new(JniType.JLong, "dataHandle")
+                    new(JniType.JLong, "targetHandle"),
+                    new(JniType.JLong, "dataHandle")
                 });
 
-            WriteIndentedLine($"*FumoCement::toNativePointer<{structGen.NativeName}>(targetHandle) = " +
-                              $"*FumoCement::toNativePointer<{structGen.NativeName}>(dataHandle);");
+            WriteIndentedLine($"*FumoCement::toNativePointer<{@struct.NativeName}>(targetHandle) = " +
+                              $"*FumoCement::toNativePointer<{@struct.NativeName}>(dataHandle);");
 
             EndJniMethod();
         }
 
-        private void WriteMethod(DownstreamMethodGenerationUnit methodGen)
+        private void WriteStructFieldGetter(StructGenerationInfo @struct, StructFieldGenerationInfo structField)
         {
-            var nativeMethod = methodGen.JniProxyMethod;
+            var generationSet = structField.GetterGenerationSet;
+            var glueMethod = generationSet.JniGlueMethod;
 
-            BeginJniMethod(nativeMethod);
-            foreach (var parameter in methodGen.GetTransitingParameters(TransitionKind.JniToNative))
+            BeginJniMethod(glueMethod);
+
+            if (generationSet.JniToCReturnValuePass is not { } returnValuePass)
             {
-                var intermediateName = parameter.IntermediateName;
-
-                WriteIndentedLine($"auto&& {intermediateName} = ");
-                Write(parameter.TransitOrGenerateValue(TransitionKind.JniToNative, methodGen));
-                Write(';');
+                throw new InvalidOperationException("Return value pass is void on struct field getter.");
             }
+
+            var handleName = glueMethod.Parameters[0].Name;
+
+            WriteIndentedLine(
+                $"auto& {returnValuePass.ValueToPass} = " +
+                $"(FumoCement::toNativePointer<{@struct.NativeName}>({handleName}))->{structField.Name};");
+
+            WriteIndentedLine($"return {PassToJava(returnValuePass)};");
+
+            EndJniMethod();
+        }
+
+        private void WriteStructFieldSetter(StructGenerationInfo @struct, StructFieldGenerationInfo structField)
+        {
+            var generationSet = structField.SetterGenerationSet;
+            var glueMethod = generationSet.JniGlueMethod;
+
+            BeginJniMethod(glueMethod);
+
+            // TODO: Dirty, maybe create some StructFieldSetterMethodGenerationSet
+            var handleName = glueMethod.Parameters[0].Name;
+            var setterValuePass = (StandaloneValuePass)generationSet.JniToCParameterPasses[0];
+
+            WriteIndentedLine(
+                $"auto& {setterValuePass.IntermediateVariableName} = " +
+                $"(FumoCement::toNativePointer<{@struct.NativeName}>({handleName}))->{structField.Name};");
+
+            WriteIndentedLine($"{setterValuePass.IntermediateVariableName} = FumoCement::passAsC(" +
+                              $"{PassToNative(setterValuePass)}" +
+                              ");");
+
+            EndJniMethod();
+        }
+
+        private void WriteMethod(MethodGenerationInfo method)
+        {
+            var generationSet = method.GenerationSet;
+
+            var glueMethod = generationSet.JniGlueMethod;
+            var returnPass = generationSet.JniToCReturnValuePass;
+            var parameterPasses = generationSet.JniToCParameterPasses;
+
+            BeginJniMethod(glueMethod);
+
+            // Put all the parameters in intermediate variables.
+            PassParametersInIntermediateVariables(parameterPasses, PassToNative);
 
             // Call the method (and put the return value in a variable if any)
             WriteIndentedLine();
-            if (methodGen.ReturnValueLinkage is not null)
+            if (returnPass is not null)
             {
-                Write("return ");
+                Write($"auto&& {returnPass.ValueToPass} = ");
             }
 
-            var expression = methodGen.FinalOperation.GenerateRunExpression(methodGen);
-            if (methodGen.ReturnValueLinkage is not null)
-            {
-                Write(methodGen.ReturnValueLinkage.TransitValue(expression, TransitionKind.NativeToJni, methodGen));
-            }
-            else
-            {
-                Write(expression);
-            }
+            Write(method.NativeMethod.Name);
+            Write('(');
+            PassIntermediateVariablesAsArgs(parameterPasses);
+            Write(");");
 
-            Write(";");
+            if (returnPass is not null)
+            {
+                WriteIndentedLine("return ");
+                Write(PassToJava(returnPass));
+                Write(";");
+            }
 
             EndJniMethod();
         }
@@ -318,19 +354,25 @@ namespace ClangSharp.JNI.JNIGlue
         private void BeginJniMethod(JniGlueMethod method)
         {
             BeginJniMethod(method.ReturnType.Value,
+                method.ContainingType,
                 method.Name,
                 true,
                 method.Parameters);
         }
 
-        private void BeginJniMethod(string returnType, string jniMethodName, bool isStatic,
+        private void BeginJniMethod(string returnType, string javaType, string javaMethodName, bool isStatic,
             IEnumerable<MethodParameter<JniType>> arguments)
         {
             WriteIndentedLine("JNIEXPORT ");
             Write(returnType);
             Write(" JNICALL ");
 
-            Write(jniMethodName);
+            Write("Java_");
+            Write(JavaConventions.CPackageName(Namespace));
+            Write("_");
+            Write(MangleNameForJniMethod(javaType));
+            Write("_");
+            Write(MangleNameForJniMethod(javaMethodName));
 
             Write("(JNIEnv* env, ");
             Write(isStatic ? "jclass" : "jobject");

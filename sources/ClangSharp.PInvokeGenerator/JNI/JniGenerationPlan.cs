@@ -2,7 +2,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
+using System.Text;
 using ClangSharp.Abstractions;
 using ClangSharp.JNI.Java;
 
@@ -22,7 +24,8 @@ namespace ClangSharp.JNI
 
         public List<JavaCallbackGenerationInfo> JavaCallbacks { get; } = new();
 
-        public StructGenerationInfo MakeStructGenerationInfo(string structName, IEnumerable<StructFieldGenerationInfo> fields)
+        public StructGenerationInfo MakeStructGenerationInfo(string structName,
+            IEnumerable<StructFieldGenerationInfo> fields)
             => new(structName, StructTypeName(structName), StructTypeInContainer(structName), fields);
 
         public ObjectJavaType NestedTypeInContainer(string name)
@@ -37,7 +40,8 @@ namespace ClangSharp.JNI
 
     internal sealed class StructGenerationInfo
     {
-        public StructGenerationInfo(string nativeName, string javaName, ObjectJavaType javaType, IEnumerable<StructFieldGenerationInfo> fields)
+        public StructGenerationInfo(string nativeName, string javaName, ObjectJavaType javaType,
+            IEnumerable<StructFieldGenerationInfo> fields)
         {
             NativeName = nativeName;
             JavaType = javaType;
@@ -246,7 +250,7 @@ namespace ClangSharp.JNI
 
     internal abstract class Method<T>
     {
-        public Method(string name, T returnType, IEnumerable<MethodParameter<T>> parameters)
+        public Method(string name, T returnType, ImmutableArray<MethodParameter<T>> parameters)
         {
             Name = name;
             ReturnType = returnType;
@@ -262,7 +266,7 @@ namespace ClangSharp.JNI
     {
         public NativeMethod(string name,
             TypeDesc returnType,
-            IEnumerable<MethodParameter<TypeDesc>> parameters) : base(name, returnType, parameters)
+            ImmutableArray<MethodParameter<TypeDesc>> parameters) : base(name, returnType, parameters)
         {
         }
     }
@@ -271,7 +275,7 @@ namespace ClangSharp.JNI
     {
         public JniGlueMethod(string name,
             JniType returnType,
-            IEnumerable<MethodParameter<JniType>> parameters,
+            ImmutableArray<MethodParameter<JniType>> parameters,
             string containingType) : base(name, returnType, parameters)
         {
             ContainingType = containingType;
@@ -284,7 +288,7 @@ namespace ClangSharp.JNI
     {
         public BodylessJavaMethod(string name,
             JavaType returnType,
-            IEnumerable<MethodParameter<JavaType>> parameters,
+            ImmutableArray<MethodParameter<JavaType>> parameters,
             bool isNative = true,
             bool isStatic = true) : base(name, returnType, parameters)
         {
@@ -298,26 +302,35 @@ namespace ClangSharp.JNI
 
     internal sealed class FullJavaMethod : Method<JavaType>
     {
+        private readonly Lazy<string> _jniSignatureLazy;
+
         public FullJavaMethod(string name,
             JavaType returnType,
-            IEnumerable<MethodParameter<JavaType>> parameters,
+            ImmutableArray<MethodParameter<JavaType>> parameters,
             bool isStatic) : base(name, returnType, parameters)
         {
             IsStatic = isStatic;
-            JniSignature = MakeJniTypeSignature();
+            _jniSignatureLazy = new Lazy<string>(MakeJniTypeSignature);
         }
 
         private string MakeJniTypeSignature()
         {
-            var parameterSigs = string.Join("", Parameters.Select(x => x.Type.JniTypeSignature));
-            var returnSig = ReturnType.JniTypeSignature;
+            var builder = new StringBuilder();
+            builder.Append('(');
+            foreach (var parameter in Parameters)
+            {
+                builder.Append(parameter.Type.JniTypeSignature);
+            }
 
-            return $"({parameterSigs}){returnSig}";
+            builder.Append(')');
+
+            builder.Append(ReturnType.JniTypeSignature);
+            return builder.ToString();
         }
 
         public bool IsStatic { get; }
 
-        public string JniSignature { get; }
+        public string JniSignature => _jniSignatureLazy.Value;
     }
 
     [Flags]

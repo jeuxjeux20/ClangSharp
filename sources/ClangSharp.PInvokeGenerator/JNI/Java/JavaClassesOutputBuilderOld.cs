@@ -4,21 +4,15 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
-using System.Text;
 using System.Xml.Linq;
-using ClangSharp.JNI.Generation.Enum;
-using ClangSharp.JNI.Generation.FunctionPointer;
-using ClangSharp.JNI.Generation.Method;
-using ClangSharp.JNI.Generation.Struct;
-using ClangSharp.JNI.Generation.Transitions;
 using Microsoft.VisualBasic.FileIO;
 
 namespace ClangSharp.JNI.Java
 {
-    internal class JavaClassesOutputBuilder : JniOutputBuilderBase
+    internal class JavaClassesOutputBuilderOld : JniOutputBuilderBaseOld
     {
-        public JavaClassesOutputBuilder(string name, PInvokeGeneratorConfiguration configuration,
-            string indentationString = DefaultIndentationString) : base(name, configuration,
+        public JavaClassesOutputBuilderOld(string name, PInvokeGeneratorConfiguration configuration,
+        string indentationString = DefaultIndentationString) : base(name, configuration,
             indentationString)
         {
             CurrentBraceStyle = BraceStyle.KAndR;
@@ -29,43 +23,41 @@ namespace ClangSharp.JNI.Java
 
         protected override void WriteContent()
         {
-            foreach (var @struct in GenerationContext.GetTransformationUnits<StructTransformationUnit>())
+            foreach (var @struct in CurrentGenerationPlan.Structs)
             {
                 GenerateStruct(@struct);
             }
 
-            foreach (var @enum in GenerationContext.GetTransformationUnits<EnumTransformationUnit>())
+            foreach (var @enum in CurrentGenerationPlan.Enums)
             {
-                GenerateEnumClass(@enum.ClassGenerationUnit);
+                GenerateEnum(@enum);
             }
 
-            foreach (var funcPointer in GenerationContext.GetTransformationUnits<FunctionPointerTransformationUnit>())
+            foreach (var callback in CurrentGenerationPlan.JavaCallbacks)
             {
-                GenerateCallbackInterface(funcPointer);
+                GenerateCallback(callback);
             }
 
-            foreach (var methodGen in GenerationContext.GetTransformationUnits<MethodTransformationUnit>())
+            foreach (var method in CurrentGenerationPlan.Methods)
             {
-                GenerateDownstreamMethod(methodGen.MethodGenerationUnit);
+                GenerateMethod(method);
             }
         }
 
-        private void GenerateStruct(StructTransformationUnit structTransformationUnit)
+        private void GenerateStruct(StructGenerationInfo @struct)
         {
-            var @struct = structTransformationUnit.ClassGenerationUnit;
             var className = @struct.JavaName;
 
             WriteIndentedLine($"public static final class {className} extends NativeStruct");
             WriteBlockStart();
 
-            WriteIndentedLine($"public static native long {StructClassGenerationUnit.AllocateStructMethodName}();");
-            WriteIndentedLine(
-                $"public static native void {StructClassGenerationUnit.DestroyStructMethodName}(long handle);");
-            WriteIndentedLine($"public static native void {StructClassGenerationUnit.OverwriteMethodName}(" +
+            WriteIndentedLine($"public static native long {@struct.AllocateStructMethodName}();");
+            WriteIndentedLine($"public static native void {@struct.DestroyStructMethodName}(long handle);");
+            WriteNewLine();
+            WriteIndentedLine($"public static native void {@struct.OverwriteMethodName}(" +
                               $"@Pointer(\"{@struct.NativeName}*\") long targetHandle, " +
                               $"@Pointer(\"{@struct.NativeName}*\") long dataHandle);");
 
-            WriteNewLine();
             WriteIndentedLine($"private static final NativeObjectTracker<{className}> ownedTracker = " +
                               $"new NativeObjectTracker<>({className}::new, NativeObjectTracker.Target.OWNED_OBJECTS);");
             WriteIndentedLine($"private static final NativeObjectTracker<{className}> unownedTracker = " +
@@ -112,35 +104,31 @@ namespace ClangSharp.JNI.Java
             WriteIndentedLine("overwrite(getHandle(), dataHandle);");
             WriteBlockEnd();
 
-            foreach (var fieldAccessorGen in structTransformationUnit.FieldAccessorGenerationUnits)
+            foreach (var field in @struct.Fields)
             {
-                GenerateDownstreamMethod(fieldAccessorGen);
+                WriteNewLine();
+
+                WriteStructFieldGetter(field);
+                WriteStructFieldSetter(field);
             }
 
             WriteBlockEnd();
         }
 
-        private void GenerateEnumClass(EnumClassGenerationUnit @enum)
+        private void GenerateEnum(EnumGenerationInfo @enum)
         {
             WriteIndentedLine($"public final class {@enum.JavaName}");
             WriteBlockStart();
 
-            foreach (var enumField in @enum.Fields)
+            foreach (var enumConstant in @enum.Constants)
             {
-                WriteIndentedLine($"public static final {enumField.Type} {enumField.Name} = {enumField.Value};");
+                var type = enumConstant.IsSigned ? "int" : "@Unsigned int";
+                var value = enumConstant.SignedValue ??
+                            (long) (enumConstant.UnsignedValue ??
+                                    throw new InvalidOperationException("Both values are null."));
+
+                WriteIndentedLine($"public static final {type} {enumConstant.JavaName} = {value};");
             }
-
-            WriteBlockEnd();
-        }
-
-        private void GenerateCallbackInterface(FunctionPointerTransformationUnit transformationUnit)
-        {
-            var interfaceGen = transformationUnit.InterfaceGenerationUnit;
-
-            WriteIndentedLine($"public interface {interfaceGen.Name}");
-            WriteBlockStart();
-
-            GenerateUpstreamMethod(transformationUnit.MethodGenerationUnit);
 
             WriteBlockEnd();
         }
@@ -201,34 +189,49 @@ namespace ClangSharp.JNI.Java
             WriteBlockEnd();
         }
 
-        private void GenerateDownstreamMethod(DownstreamMethodGenerationUnit methodGen)
+        private void GenerateMethod(MethodGenerationInfo method)
         {
-            var nativeMethod = methodGen.JavaNativeMethod;
-            var publicMethod = methodGen.JavaMethod;
+            var generationSet = method.GenerationSet;
+
+            var nativeMethod = generationSet.InternalJavaNativeMethod;
+            var publicMethod = generationSet.PublicJavaMethod;
+            var parameterPasses = generationSet.JavaToJniParameterPasses;
 
             WriteBodylessMethod(nativeMethod, "public");
 
             BeginFullJavaMethod(publicMethod);
 
-            var finalMethod = methodGen.JavaNativeMethod.Name;
-            JavaConstructs.WriteMethodTransition(this, methodGen, TransitionKind.JavaToJni, finalMethod);
+            for (var i = 0; i < parameterPasses.Count; i++)
+            {
+                var parameterPass = parameterPasses[i];
+                var parameterType = nativeMethod.Parameters[i].Type;
 
-            EndFullJavaMethod();
-        }
+                WriteIndentedLine($"{parameterType.AsString} {parameterPass.IntermediateVariableName} = ");
+                Write(PassToJni(parameterPass));
+                Write(';');
+            }
 
-        private void GenerateUpstreamMethod(UpstreamMethodGenerationUnit methodGen)
-        {
-            var callbackMethod = methodGen.CallbackMethod;
-            var callbackCallerMethod = methodGen.CallbackCallerMethod;
+            var returnPass = generationSet.JavaToJniReturnValuePass;
+            var hasReturnValue = returnPass != null;
 
-            WriteBodylessMethod(callbackMethod, "public");
+            WriteNewLine();
+            WriteIndentation();
+            if (hasReturnValue)
+            {
+                Write($"{nativeMethod.ReturnType.AsString} {returnPass.ValueToPass} = ");
+            }
 
-            BeginFullJavaMethod(callbackCallerMethod);
+            // Call the native method.
+            Write(nativeMethod.Name);
+            WriteMethodArgumentsFromIntermediate(parameterPasses);
+            Write(";");
 
-            var callbackObjLink = methodGen.ParameterLinkages.First(x => x.TargetParameter is CallbackObjectParameter);
-            var callbackObjectParameter = callbackObjLink.TransitingParameter.Name;
-            var finalMethod = $"{callbackObjectParameter}.{callbackMethod.Name}";
-            JavaConstructs.WriteMethodTransition(this, methodGen, TransitionKind.JniToJava, finalMethod);
+            if (hasReturnValue)
+            {
+                WriteIndentedLine("return ");
+                Write(PassToJava(returnPass));
+                Write(";");
+            }
 
             EndFullJavaMethod();
         }
@@ -279,6 +282,70 @@ namespace ClangSharp.JNI.Java
 
                 _ => throw UnsupportedPass(pass)
             };
+        }
+
+        private void WriteStructFieldGetter(StructFieldGenerationInfo structField)
+        {
+            var generationSet = structField.GetterGenerationSet;
+
+            var nativeMethod = generationSet.InternalJavaNativeMethod;
+            var publicMethod = generationSet.PublicJavaMethod;
+            var parameterPasses = generationSet.JavaToJniParameterPasses;
+
+            WriteBodylessMethod(nativeMethod, "public");
+
+            BeginFullJavaMethod(publicMethod);
+
+            for (var i = 0; i < parameterPasses.Count; i++)
+            {
+                var parameterPass = parameterPasses[i];
+                var parameterType = nativeMethod.Parameters[i].Type;
+
+                WriteIndentedLine($"{parameterType} {parameterPass.IntermediateVariableName} = " +
+                                  $"{PassToJni(parameterPass)};");
+            }
+
+            var returnPass = generationSet.JavaToJniReturnValuePass ??
+                             throw new InvalidOperationException("No valid return value pass in struct getter.");
+
+            WriteIndentedLine($"{nativeMethod.ReturnType} {returnPass.ValueToPass} = ");
+            Write(nativeMethod.Name);
+            WriteMethodArgumentsFromIntermediate(parameterPasses);
+            Write(";");
+
+            WriteIndentedLine($"return {PassToJava(returnPass)};");
+
+            EndFullJavaMethod();
+        }
+
+        private void WriteStructFieldSetter(StructFieldGenerationInfo structField)
+        {
+            var generationSet = structField.SetterGenerationSet;
+
+            var nativeMethod = generationSet.InternalJavaNativeMethod;
+            var publicMethod = generationSet.PublicJavaMethod;
+            var parameterPasses = generationSet.JavaToJniParameterPasses;
+
+            WriteNewLine();
+
+            WriteBodylessMethod(nativeMethod, "public");
+
+            BeginFullJavaMethod(publicMethod);
+
+            for (var i = 0; i < generationSet.JavaToJniParameterPasses.Count; i++)
+            {
+                var parameterPass = generationSet.JavaToJniParameterPasses[i];
+                var parameterType = nativeMethod.Parameters[i].Type;
+
+                WriteIndentedLine($"{parameterType} {parameterPass.IntermediateVariableName} = " +
+                                  $"{PassToJni(parameterPass)};");
+            }
+
+            WriteIndentedLine($"{nativeMethod.Name}");
+            WriteMethodArgumentsFromIntermediate(parameterPasses);
+            Write(";");
+
+            EndFullJavaMethod();
         }
 
         /*CODE TO RESTORE
@@ -351,30 +418,6 @@ namespace ClangSharp.JNI.Java
             WriteBlockEnd();
         }
 
-        private string BuildMethodCallExpression(string name, IReadOnlyList<string> arguments)
-        {
-            var builder = new StringBuilder();
-            builder.Append(name);
-            builder.Append('(');
-            for (var i = 0; i < arguments.Count; i++)
-            {
-                var argument = arguments[i];
-                builder.Append(argument);
-                if (i != arguments.Count - 1)
-                {
-                    builder.Append(", ");
-                }
-            }
-
-            builder.Append(')');
-            return builder.ToString();
-        }
-
-        private string BuildMethodCallExpression(string name, IEnumerable<TransitingMethodParameter> arguments)
-        {
-            return BuildMethodCallExpression(name, arguments.Select(x => x.IntermediateName).ToArray());
-        }
-
         private void WriteMethodArguments(IReadOnlyList<string> arguments)
         {
             Write("(");
@@ -394,11 +437,6 @@ namespace ClangSharp.JNI.Java
         private void WriteMethodArgumentsFromIntermediate(IReadOnlyList<ValuePass> parameterPasses)
         {
             WriteMethodArguments(parameterPasses.Select(x => x.IntermediateVariableName).ToArray());
-        }
-
-        private void WriteMethodArgumentsFromIntermediate(IReadOnlyList<TransitingMethodParameter> parameters)
-        {
-            WriteMethodArguments(parameters.Select(x => x.IntermediateName).ToArray());
         }
 
         private void WriteMethodParameters(IReadOnlyList<MethodParameter<JavaType>> parameters)

@@ -37,14 +37,23 @@ namespace ClangSharp.Abstractions
             return type;
         }
 
-        protected TypeDesc(Type canonicalType, Type rawType)
+        protected TypeDesc(Type canonicalType, Type rawType) : this(canonicalType.AsString, canonicalType.Kind,
+            rawType?.AsString)
         {
-            AsString = canonicalType.AsString;
-            AsRawString = rawType?.AsString ?? AsString;
-            Kind = canonicalType.Kind;
+        }
+
+        protected TypeDesc(string stringRepr, CXTypeKind kind, string rawStringRepr = null)
+        {
+            AsString = stringRepr;
+            AsRawString = rawStringRepr ?? stringRepr;
+            Kind = kind;
         }
 
         protected bool IsFullyFormed { get; set; } = true;
+        /// <summary>
+        /// The original representation of that type, without "sugared" types, especially typedefs.
+        /// For example, <c>SomeStruct*</c> might become <c>SomeStructHandle</c>.
+        /// </summary>
         public string AsRawString { get; private set; }
         public string AsString { get; }
         public CXTypeKind Kind { get; }
@@ -58,13 +67,21 @@ namespace ClangSharp.Abstractions
 
     internal sealed class BuiltinTypeDesc : TypeDesc
     {
+        public static readonly BuiltinTypeDesc Void = new(CXTypeKind.CXType_Void, "void");
+
         public BuiltinTypeDesc(BuiltinType canonicalType, Type rawType) : base(canonicalType, rawType)
+        {
+        }
+
+        private BuiltinTypeDesc(CXTypeKind kind, string repr) : base(repr, kind)
         {
         }
     }
 
     internal sealed class PointerTypeDesc : TypeDesc
     {
+        public static readonly PointerTypeDesc VoidPointer = new(BuiltinTypeDesc.Void);
+
         public TypeDesc PointeeType { get; }
 
         public PointerTypeDesc(PointerType canonicalType, Type rawType) : base(canonicalType, rawType)
@@ -73,6 +90,11 @@ namespace ClangSharp.Abstractions
             PointeeType = Create(canonicalType.PointeeType, rawPointerType?.PointeeType);
 
             IsFullyFormed = PointeeType != null;
+        }
+
+        public PointerTypeDesc(TypeDesc pointeeType) : base(pointeeType.AsString + "*", CXTypeKind.CXType_Pointer,
+            pointeeType.AsRawString != null ? pointeeType.AsRawString + "*" : null)
+        {
         }
     }
 
@@ -91,6 +113,11 @@ namespace ClangSharp.Abstractions
             {
                 Name = canonicalType.AsString;
             }
+        }
+
+        public RecordTypeDesc(string recordName) : base(recordName, CXTypeKind.CXType_Record)
+        {
+            Name = recordName;
         }
     }
 

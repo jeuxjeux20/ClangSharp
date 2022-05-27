@@ -3,26 +3,21 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.Linq;
 using System.Text;
 using ClangSharp.Abstractions;
 using ClangSharp.CSharp;
-using ClangSharp.JNI.Generation;
-using ClangSharp.JNI.Generation.Enum;
-using ClangSharp.JNI.Generation.Method;
-using ClangSharp.JNI.Generation.Struct;
 using ClangSharp.JNI.Java;
 
 namespace ClangSharp.JNI
 {
-    internal abstract class JniOutputBuilderBase : IOutputBuilder, IIndentedWriter
+    internal abstract class JniOutputBuilderBaseOld : IOutputBuilder
     {
         public const string DefaultIndentationString = "    ";
 
-        protected JniGenerationContext GenerationContext { get; }
+        protected JniGenerationPlan CurrentGenerationPlan { get; }
 
         protected BraceStyle CurrentBraceStyle { get; set; } = BraceStyle.Allman;
-        public StringBuilder RawBuilder { get; } = new();
+        protected StringBuilder ContentStringBuilder { get; } = new();
         private int _indentationLevel = new();
         private readonly PInvokeGeneratorConfiguration _configuration;
         private readonly string _indentationString;
@@ -33,14 +28,14 @@ namespace ClangSharp.JNI
 
         public bool IsUncheckedContext => true;
 
-        protected JniOutputBuilderBase(string name, PInvokeGeneratorConfiguration configuration,
+        protected JniOutputBuilderBaseOld(string name, PInvokeGeneratorConfiguration configuration,
             string indentationString)
         {
             Name = name;
             _configuration = configuration;
             _indentationString = indentationString;
             Namespace = configuration.DefaultNamespace;
-            GenerationContext = new JniGenerationContext(Namespace, configuration.MethodClassName);
+            CurrentGenerationPlan = new JniGenerationPlan { ContainerClass = configuration.MethodClassName, Package = Namespace };
         }
 
         protected static UnsupportedJniScenarioException UnsupportedType<T>(T type)
@@ -63,8 +58,8 @@ namespace ClangSharp.JNI
             get
             {
                 WriteContent();
-                var content = RawBuilder.ToString();
-                _ = RawBuilder.Clear();
+                var content = ContentStringBuilder.ToString();
+                _ = ContentStringBuilder.Clear();
                 return content;
             }
         }
@@ -75,30 +70,25 @@ namespace ClangSharp.JNI
         {
             for (var i = 0; i < _indentationLevel; i++)
             {
-                _ = RawBuilder.Append(_indentationString);
+                _ = ContentStringBuilder.Append(_indentationString);
             }
-        }
-
-        public void Write(GeneratedExpression generatedExpression)
-        {
-            generatedExpression.WriteTo(this);
         }
 
         public void Write<T>(T value)
         {
-            _ = RawBuilder.Append(value);
+            _ = ContentStringBuilder.Append(value);
         }
 
         public void WriteIndentedLine(string value = "")
         {
-            _ = RawBuilder.AppendLine();
+            _ = ContentStringBuilder.AppendLine();
             WriteIndentation();
-            _ = RawBuilder.Append(value);
+            _ = ContentStringBuilder.Append(value);
         }
 
         public void WriteNewLine()
         {
-            _ = RawBuilder.AppendLine();
+            _ = ContentStringBuilder.AppendLine();
         }
 
         public void DecreaseIndentation()
@@ -216,15 +206,8 @@ namespace ClangSharp.JNI
 
         public virtual void EndEnum(in EnumDesc desc)
         {
-            try
-            {
-                var @enum = new EnumTarget(_preliminaryEnum.JavaName, _preliminaryEnum.Constants.ToImmutableArray());
-                GenerationContext.AddTransformationUnit(new EnumTransformationUnit(@enum));
-            }
-            catch (UnsupportedJniScenarioException e)
-            {
-                Console.WriteLine($"Failed to transform enum {_preliminaryEnum.JavaName}: {e.Message}");
-            }
+            CurrentGenerationPlan.Enums.Add(
+                new EnumGenerationInfo(_preliminaryEnum.JavaName, _preliminaryEnum.Constants));
 
             _preliminaryEnum = null;
         }
@@ -244,9 +227,37 @@ namespace ClangSharp.JNI
                 return;
             }
 
-            var field = new StructField(canonicalType, desc.EscapedName);
+            var field = new PreliminaryStructField(JavaConventions.EscapeName(desc.EscapedName),
+                canonicalType);
 
-            _preliminaryStruct.Fields.Add(field);
+            MethodGenerationSet getterGen;
+            try
+            {
+                getterGen = CreateFieldGetterMethodGenerationSet(field);
+            }
+            catch (UnsupportedJniScenarioException e)
+            {
+                Console.WriteLine($"Failed to create a getter for struct {_preliminaryStruct.JavaName}: {e.Message}");
+                return;
+            }
+
+            MethodGenerationSet setterGen;
+            try
+            {
+                setterGen = CreateFieldSetterMethodGenerationSet(field);
+            }
+            catch (UnsupportedJniScenarioException e)
+            {
+                Console.WriteLine($"Failed to create a setter for struct {_preliminaryStruct.JavaName}: {e.Message}");
+                return;
+            }
+
+            _preliminaryStruct.Fields.Add(new StructFieldGenerationInfo(
+                field.Name,
+                field.Type,
+                getterGen,
+                setterGen
+            ));
         }
 
         public virtual void WriteFixedCountField(string typeName, string escapedName, string fixedName, string count)
@@ -260,10 +271,12 @@ namespace ClangSharp.JNI
 
         public void EndField(in FieldDesc desc)
         {
+
         }
 
         public void BeginFunctionInnerPrototype(in FunctionOrDelegateDesc info)
         {
+
         }
 
         public void BeginParameter(in ParameterDesc info)
@@ -297,13 +310,14 @@ namespace ClangSharp.JNI
 
             _preliminaryFunction = new PreliminaryFunction {
                 NativeName = info.EscapedName,
-                JavaName = JavaConventions.EscapeName(info.EscapedName),
+                JavaName = JavaConventions.EscapeName(info.EscapedName), // TODO: remove escape
                 ReturnType = canonicalType.ReturnType
             };
         }
 
         public virtual void EndParameter(in ParameterDesc info)
         {
+
         }
 
         public virtual void BeginParameterDefault()
@@ -373,20 +387,21 @@ namespace ClangSharp.JNI
                 return;
             }
 
+            var nativeMethod = new NativeMethod(_preliminaryFunction.NativeName,
+                _preliminaryFunction.ReturnType, _preliminaryFunction.Parameters.ToImmutableArray());
+
+            MethodGenerationSet generationSet;
             try
             {
-                var nativeMethod = new NativeMethod(_preliminaryFunction.NativeName,
-                    _preliminaryFunction.ReturnType, _preliminaryFunction.Parameters.ToImmutableArray());
-
-                var transformationUnit = new MethodTransformationUnit(new MethodTarget(nativeMethod), GenerationContext,
-                    out var generatedTransformationUnits);
-                GenerationContext.AddTransformationUnit(transformationUnit);
-                GenerationContext.AddTransformationUnits(generatedTransformationUnits);
+                generationSet = CreateFunctionMethodGenerationSet(_preliminaryFunction);
             }
             catch (UnsupportedJniScenarioException e)
             {
-                Console.WriteLine($"Failed to transform function {_preliminaryFunction.NativeName}: {e.Message}");
+                Console.WriteLine($"Failed to write method {_preliminaryFunction.NativeName}: {e.Message}");
+                throw;
             }
+
+            CurrentGenerationPlan.Methods.Add(new MethodGenerationInfo(nativeMethod, generationSet));
 
             _preliminaryFunction = null;
         }
@@ -398,7 +413,7 @@ namespace ClangSharp.JNI
                 var javaName = JavaConventions.EscapeName(info.EscapedName);
 
                 _preliminaryStruct =
-                    new PreliminaryStruct(javaName, GenerationContext.StructTypeInContainer(javaName));
+                    new PreliminaryStruct(javaName, CurrentGenerationPlan.StructTypeInContainer(javaName));
             }
         }
 
@@ -429,21 +444,8 @@ namespace ClangSharp.JNI
                 return;
             }
 
-            try
-            {
-                var target = new StructTarget(info.EscapedName, _preliminaryStruct.JavaName,
-                    GenerationContext.NestedTypeInContainer(_preliminaryStruct.JavaName),
-                    _preliminaryStruct.Fields.ToImmutableArray());
-
-                var transformationUnit =
-                    new StructTransformationUnit(target, GenerationContext, out var generatedTransformationUnits);
-                GenerationContext.AddTransformationUnit(transformationUnit);
-                GenerationContext.AddTransformationUnits(generatedTransformationUnits);
-            }
-            catch (UnsupportedJniScenarioException e)
-            {
-                Console.WriteLine($"Failed to transform struct {_preliminaryStruct.JavaName}: {e.Message}");
-            }
+            CurrentGenerationPlan.Structs.Add(
+                CurrentGenerationPlan.MakeStructGenerationInfo(_preliminaryStruct.JavaName, _preliminaryStruct.Fields));
 
             _preliminaryStruct = null;
         }
@@ -563,6 +565,100 @@ namespace ClangSharp.JNI
             // nop, send help
         }
 
+        private MethodGenerationSet CreateFieldGetterMethodGenerationSet(PreliminaryStructField field)
+        {
+            var publicMethodName = JavaConventions.Getter(field.EscapedName, field.Type.AsString);
+            var nativeMethodName = publicMethodName + "Raw";
+
+            var generator = new ValuePassGenerator(CurrentGenerationPlan);
+
+            generator.ConsumeStructHandle();
+            generator.Consume(field.Type, "returnValue", ValuePassContext.StructFieldReturnValue);
+
+            return BuildGenerationSet(publicMethodName, nativeMethodName,
+                _preliminaryStruct.JavaType.RawName, false, generator);
+        }
+
+        private MethodGenerationSet CreateFieldSetterMethodGenerationSet(PreliminaryStructField field)
+        {
+            var publicMethodName = JavaConventions.Setter(field.EscapedName);
+            var nativeMethodName = publicMethodName + "Raw";
+
+            var generator = new ValuePassGenerator(CurrentGenerationPlan);
+
+            generator.ConsumeStructHandle();
+            generator.Consume(field.Type, "value", ValuePassContext.StructFieldSetterParameter);
+
+            return BuildGenerationSet(publicMethodName, nativeMethodName,
+                _preliminaryStruct.JavaType.RawName, false, generator);
+        }
+
+        private MethodGenerationSet CreateFunctionMethodGenerationSet(in PreliminaryFunction function)
+        {
+            var publicMethodName = function.JavaName;
+            var nativeMethodName = publicMethodName + "$Raw";
+
+            var generator = new ValuePassGenerator(CurrentGenerationPlan);
+
+            generator.ConsumeFunctionParameters(function.Parameters, publicMethodName);
+
+            generator.Consume(function.ReturnType, "returnValue", ValuePassContext.MethodReturnValue);
+
+            return BuildGenerationSet(publicMethodName, nativeMethodName,
+                CurrentGenerationPlan.ContainerClass, true, generator);
+        }
+
+        private static MethodGenerationSet BuildGenerationSet(
+            string publicMethodName,
+            string nativeMethodName,
+            string containingType,
+            bool isStatic,
+            ValuePassGenerator generator)
+        {
+            var generatedParameters = generator.GeneratedParameters;
+            var generatedReturnTypes = generator.GeneratedReturnTypes;
+
+            return new MethodGenerationSet(
+                new JniGlueMethod(
+                    nativeMethodName,
+                    generatedReturnTypes.Native,
+                    generatedParameters.Native.ToImmutableArray(),
+                    containingType
+                ),
+                new BodylessJavaMethod(
+                    nativeMethodName,
+                    generatedReturnTypes.InternalJavaNative,
+                    generatedParameters.InternalJavaNative.ToImmutableArray()),
+                new FullJavaMethod(
+                    publicMethodName,
+                    generatedReturnTypes.PublicJava,
+                    generatedParameters.PublicJava.ToImmutableArray(),
+                    isStatic
+                ),
+                generator.ReturnTypePass,
+                generator.ParameterPasses
+            );
+        }
+
+        private readonly struct PreliminaryStructField
+        {
+            public PreliminaryStructField(string name, TypeDesc type)
+            {
+                Name = name;
+                EscapedName = name == "handle" ? "handleField" : name;
+                Type = type;
+            }
+
+            public string Name { get; }
+
+            /// <summary>
+            /// The name for use as part of getter/setter methods
+            /// </summary>
+            public string EscapedName { get; }
+
+            public TypeDesc Type { get; }
+        }
+
         private class PreliminaryFunction
         {
             public string NativeName { get; set; }
@@ -575,7 +671,7 @@ namespace ClangSharp.JNI
         {
             public string JavaName { get; set; }
             public PreliminaryEnumConstant? PreliminaryConstant { get; set; }
-            public List<EnumConstant> Constants { get; } = new();
+            public List<EnumConstantGenerationInfo> Constants { get; } = new();
 
             public void CommitSignedPreliminaryConstant(long enumValue)
             {
@@ -583,7 +679,7 @@ namespace ClangSharp.JNI
                                      throw new InvalidOperationException(
                                          "Attempted to commit while the preliminary constant is null.");
 
-                Constants.Add(EnumConstant.Signed(actualConstant.JavaName, enumValue));
+                Constants.Add(EnumConstantGenerationInfo.Signed(actualConstant.JavaName, enumValue));
             }
 
             public void CommitUnsignedPreliminaryConstant(ulong enumValue)
@@ -592,11 +688,19 @@ namespace ClangSharp.JNI
                                      throw new InvalidOperationException(
                                          "Attempted to commit while the preliminary constant is null.");
 
-                Constants.Add(EnumConstant.Unsigned(actualConstant.JavaName, enumValue));
+                Constants.Add(EnumConstantGenerationInfo.Unsigned(actualConstant.JavaName, enumValue));
             }
         }
 
-        private readonly record struct PreliminaryEnumConstant(string JavaName);
+        private readonly struct PreliminaryEnumConstant
+        {
+            public PreliminaryEnumConstant(string javaName)
+            {
+                JavaName = javaName;
+            }
+
+            public string JavaName { get; }
+        }
 
         private class PreliminaryStruct
         {
@@ -609,9 +713,8 @@ namespace ClangSharp.JNI
             public string JavaName { get; }
             public ObjectJavaType JavaType { get; }
 
-            public List<StructField> Fields { get; } = new();
+            public List<StructFieldGenerationInfo> Fields { get; } = new();
         }
-
 
         protected enum BraceStyle
         {

@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using ClangSharp.Abstractions;
 using ClangSharp.Interop;
@@ -74,7 +75,7 @@ namespace ClangSharp.JNI
         {
             if (type is PointerTypeDesc {
                 PointeeType: FunctionProtoTypeDesc {
-                    Parameters: { Count: > 0 }
+                    Parameters.Count: > 0
                 } functionType
             })
             {
@@ -91,7 +92,7 @@ namespace ClangSharp.JNI
             VariableToGenerate mainVariable;
             var mainPass = type switch {
                 BuiltinTypeDesc { Kind: CXTypeKind.CXType_Void } => PassVoid(),
-                PointerTypeDesc { PointeeType: { Kind: CXTypeKind.CXType_Char_S } } => PassString(),
+                PointerTypeDesc { PointeeType.Kind: CXTypeKind.CXType_Char_S } => PassString(),
                 PointerTypeDesc pointerType => PassPointer(pointerType),
                 BuiltinTypeDesc builtinType => PassPrimitive(builtinType),
                 RecordTypeDesc recordType => PassStruct(recordType),
@@ -268,7 +269,7 @@ namespace ClangSharp.JNI
 
             ParameterPasses.Add(new PassStructHandleAsJLong());
             ParameterVariables.Add(new VariableToGenerate("handle",
-                new JniType(JniType.JLong),
+                JniType.JLong,
                 type,
                 null));
         }
@@ -324,11 +325,11 @@ namespace ClangSharp.JNI
                 return new JavaCallbackGenerationSet(
                     new FullJavaMethod(CallbackCall,
                         generator.GeneratedReturnTypes.InternalJavaNative,
-                        generator.GeneratedParameters.InternalJavaNative,
+                        generator.GeneratedParameters.InternalJavaNative.ToImmutableArray(),
                         true),
                     new BodylessJavaMethod(Execute,
                         generator.GeneratedReturnTypes.PublicJava,
-                        generator.GeneratedParameters.PublicJava,
+                        generator.GeneratedParameters.PublicJava.ToImmutableArray(),
                         false,
                         false),
                     generator.ReturnTypePass,
@@ -361,7 +362,7 @@ namespace ClangSharp.JNI
                 return new FunctionPointerProxyGenerationSet(
                     new NativeMethod("__lambda",
                         functionPointerType.ReturnType,
-                        nativeParameters),
+                        nativeParameters.ToImmutableArray()),
                     callbackGenerationSet.CallbackCallMethod,
                     generator.ReturnTypePass,
                     generator.ParameterPasses,
