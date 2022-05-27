@@ -21,7 +21,7 @@ internal class NestedStructRefValueTransition : TransitionAction
     {
         return transitionKind switch {
             TransitionKind.JavaToJni => $"{valueExpression}.getHandle()",
-            TransitionKind.JniToNative => $"FumoCement::toNativePointer<{NativeType.Name}>({valueExpression})",
+            TransitionKind.JniToNative => $"*FumoCement::toNativePointer<{NativeType.Name}>({valueExpression})",
 
             TransitionKind.NativeToJni => $"FumoCement::toJavaPointer(&{valueExpression})",
             TransitionKind.JniToJava => $"{JavaStructClass}.getTrackedAndUnowned({valueExpression})",

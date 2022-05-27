@@ -8,6 +8,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using ClangSharp.JNI.Generation.Transitions;
 using ClangSharp.JNI.Java;
+using ClangSharp.JNI.JNIGlue;
 
 namespace ClangSharp.JNI.Generation.Method;
 

@@ -28,7 +28,9 @@ internal class FindCallbackMethodIdTransition : TransitionAction
             writer.RawBuilder.AppendTemplateString(upstreamMethodGen.CallbackCallerMethod.Name);
             writer.Write(", ");
             writer.RawBuilder.AppendTemplateString(upstreamMethodGen.CallbackCallerMethod.JniSignature);
-            writer.Write(">()");
+            writer.Write(">(");
+            writer.Write(upstreamMethodGen.CallbackContextParameter.IntermediateName);
+            writer.Write("->getEnv())");
         }
 
         return new GeneratedExpression(Write);

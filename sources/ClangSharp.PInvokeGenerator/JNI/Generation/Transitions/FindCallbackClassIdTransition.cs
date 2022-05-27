@@ -1,5 +1,7 @@
 ﻿// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
+using System.Linq;
+using ClangSharp.JNI.Generation.FunctionPointer;
 using ClangSharp.JNI.Generation.Method;
 
 namespace ClangSharp.JNI.Generation.Transitions;
@@ -24,7 +26,9 @@ internal class FindCallbackClassIdTransition : TransitionAction
         {
             writer.Write("FumoCement::getCachedClass<");
             writer.RawBuilder.AppendTemplateString(upstreamMethodGen.CallbackType.FullJniClass);
-            writer.Write(">()");
+            writer.Write(">(");
+            writer.Write(upstreamMethodGen.CallbackContextParameter.IntermediateName);
+            writer.Write("->getEnv())");
         }
 
         return new GeneratedExpression(Write);

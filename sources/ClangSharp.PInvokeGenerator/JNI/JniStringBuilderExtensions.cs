@@ -53,18 +53,6 @@ internal static class JniStringBuilderExtensions
         return AppendMethodCallExpression(builder, name, arguments, static x => x);
     }
 
-    public static StringBuilder AppendMethodCallExpression(this StringBuilder builder, string name,
-        IReadOnlyList<MethodParameterLinkage> arguments)
-    {
-        return AppendMethodCallExpression(builder, name, arguments, static x => x.TransitingParameter.IntermediateName);
-    }
-
-    public static StringBuilder AppendMethodCallExpression(this StringBuilder builder, string name,
-        IReadOnlyList<TransitingMethodParameter> arguments)
-    {
-        return AppendMethodCallExpression(builder, name, arguments, static x => x.IntermediateName);
-    }
-
     public static StringBuilder AppendMethodParameters<T>(this StringBuilder builder, IReadOnlyList<T> parameters,
         Func<T, string> toString)
     {

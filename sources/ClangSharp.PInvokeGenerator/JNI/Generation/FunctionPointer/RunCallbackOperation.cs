@@ -40,7 +40,8 @@ internal record RunCallbackOperation(FunctionProtoTypeDesc FunctionPointerType, 
         builder.Append('(');
         builder.Append(contextParameter);
         builder.Append("->getEnv())->");
-        builder.AppendMethodCallExpression(method, parameterLinkages.SkipLast(1).ToArray());
+        builder.AppendMethodCallExpression(method, parameterLinkages.SkipLast(1).ToArray(),
+            linkage => linkage.TransitingParameter.GetNativeTransitExpression());
 
         return builder.ToString();
     }

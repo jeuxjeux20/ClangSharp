@@ -9,12 +9,6 @@ namespace ClangSharp.JNI
         public static UnsupportedJniScenarioException UnsupportedType<T>(T type)
             => new($"Type not supported: {type}.");
 
-        public static UnsupportedJniScenarioException UnsupportedPass(string message, ValuePass valuePass)
-            => new($"Cannot handle {valuePass}: {message}");
-
-        public static UnsupportedJniScenarioException UnsupportedPass(ValuePass valuePass)
-            => new($"Cannot handle {valuePass} in this scenario.");
-
         public UnsupportedJniScenarioException()
         {
         }

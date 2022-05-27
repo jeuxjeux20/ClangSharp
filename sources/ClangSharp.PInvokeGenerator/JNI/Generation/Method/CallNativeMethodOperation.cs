@@ -5,6 +5,7 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
 using ClangSharp.Abstractions;
+using ClangSharp.JNI.JNIGlue;
 
 namespace ClangSharp.JNI.Generation.Method;
 
@@ -15,7 +16,8 @@ internal sealed record CallNativeMethodOperation(NativeMethod Method)
     public override string GenerateRunExpression(MethodGenerationUnit generationUnit)
     {
         var stringBuilder = new StringBuilder();
-        stringBuilder.AppendMethodCallExpression(Method.Name, generationUnit.ParameterLinkages);
+        stringBuilder.AppendMethodCallExpression(Method.Name, generationUnit.ParameterLinkages,
+            link => link.TransitingParameter.GetNativeTransitExpression());
 
         return stringBuilder.ToString();
     }

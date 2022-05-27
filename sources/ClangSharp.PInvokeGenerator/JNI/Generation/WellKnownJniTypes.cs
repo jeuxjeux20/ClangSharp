@@ -16,6 +16,6 @@ internal static class WellKnownJniTypes
     public static class Java
     {
         public static ObjectJavaType FunctionPointer(string callbackType)
-            => new("com.github.fumocement", "FunctionPointer", new[] { callbackType });
+            => new("com.github.novelrt.fumocement", "FunctionPointer", new[] { callbackType });
     }
 }

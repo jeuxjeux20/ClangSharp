@@ -20,7 +20,7 @@ internal sealed class MethodTransformationUnit : TransformationUnit<MethodTarget
 
         MethodGenerationUnit = DownstreamMethodGenerationUnit.UseLinker(
             new DownstreamMethodLinker(operation, context),
-            new DownstreamMethodGenerationProperties(methodName, methodName + "$Raw", context.ContainerType),
+            new DownstreamMethodGenerationProperties(methodName, methodName + "Raw", context.ContainerType),
             out generatedTransformationUnits);
     }
 }

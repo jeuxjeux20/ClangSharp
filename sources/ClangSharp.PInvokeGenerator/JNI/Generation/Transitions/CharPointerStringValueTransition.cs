@@ -16,6 +16,7 @@ internal class CharPointerStringValueTransition : TransitionAction
     }
 
     public override bool NeedsIntermediateReturnValue => true;
+    public override bool NeedsCppToCTransformation => true;
 
     public override GeneratedExpression TransitValue(string valueExpression,
         TransitionKind transitionKind, MethodGenerationUnit generationUnit)

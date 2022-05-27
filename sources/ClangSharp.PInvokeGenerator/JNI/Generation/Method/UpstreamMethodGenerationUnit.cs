@@ -2,9 +2,11 @@
 
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using ClangSharp.Abstractions;
-using ClangSharp.JNI.Generation.Transitions;
+using ClangSharp.JNI.Generation.FunctionPointer;
 using ClangSharp.JNI.Java;
+using ClangSharp.JNI.JNIGlue;
 
 #nullable enable
 namespace ClangSharp.JNI.Generation.Method;
@@ -46,6 +48,7 @@ internal class UpstreamMethodGenerationUnit : MethodGenerationUnit
             isStatic: false);
 
         CallbackType = methodGenerationProperties.CallbackType;
+        CallbackContextParameter = FindContextParameter();
     }
 
     public NativeMethod JniCallbackCallerLambda { get; }
@@ -53,6 +56,13 @@ internal class UpstreamMethodGenerationUnit : MethodGenerationUnit
     public BodylessJavaMethod CallbackMethod { get; }
 
     public ObjectJavaType CallbackType { get; }
+
+    public TransitingMethodParameter CallbackContextParameter { get; }
+
+    private TransitingMethodParameter FindContextParameter()
+    {
+        return ParameterLinkages.First(x => x.TargetParameter is CallbackContextParameter).TransitingParameter;
+    }
 }
 
 internal readonly record struct UpstreamMethodGenerationProperties(ObjectJavaType CallbackType,

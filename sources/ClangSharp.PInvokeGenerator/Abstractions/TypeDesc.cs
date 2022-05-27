@@ -57,7 +57,7 @@ namespace ClangSharp.Abstractions
         public string AsRawString { get; private set; }
         public string AsString { get; }
         public CXTypeKind Kind { get; }
-        public override string ToString() => AsString;
+        public override string ToString() => AsRawString;
 
         protected T RecoverRawType<T>(Type rawType) where T : Type
         {

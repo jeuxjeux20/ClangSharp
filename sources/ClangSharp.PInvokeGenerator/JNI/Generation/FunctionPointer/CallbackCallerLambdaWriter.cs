@@ -12,12 +12,12 @@ internal static class CallbackCallerLambdaWriter
         var lambda = upstreamMethodGen.JniCallbackCallerLambda;
 
         writer.Write("[]");
-        writer.RawBuilder.AppendMethodParameters(lambda.Parameters, p => p.ToString());
+        writer.RawBuilder.AppendMethodParameters(lambda.Parameters, p => $"{p.Type.AsRawString} {p.Name}");
         writer.Write(" -> ");
         writer.Write(lambda.ReturnType);
         writer.WriteBlockStart();
 
-        foreach (var parameter in upstreamMethodGen.GetTransitingParameters(TransitionKind.NativeToJni))
+        foreach (var parameter in upstreamMethodGen.GetSortedTransitingParameters(TransitionKind.NativeToJni))
         {
             writer.WriteIndentedLine($"auto&& {parameter.IntermediateName} = ");
             writer.Write(parameter.TransitOrGenerateValue(TransitionKind.NativeToJni, upstreamMethodGen));

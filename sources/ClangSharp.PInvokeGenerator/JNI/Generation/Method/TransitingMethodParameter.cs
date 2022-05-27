@@ -21,7 +21,8 @@ internal record TransitingMethodParameter
         JavaType? javaJniType = null,
         string? intermediateName = null,
         TransitionBehaviorSet? transitionBehaviors = null,
-        bool isExceptionalParameter = false)
+        bool isExceptionalParameter = false,
+        int intermediateOrdering = 0)
     {
         Name = name;
         JavaType = javaType;
@@ -31,6 +32,7 @@ internal record TransitingMethodParameter
         TransitionAction = transitionAction;
         TransitionDirection = transitionDirection;
         IntermediateName = intermediateName ?? name + "$int";
+        IntermediateOrdering = intermediateOrdering;
 
         if (transitionBehaviors is { } validTransitionBehaviors)
         {
@@ -54,6 +56,7 @@ internal record TransitingMethodParameter
     public JavaType? JavaJniType { get; }
 
     public string IntermediateName { get; }
+    public int IntermediateOrdering { get; }
 
     public TransitionBehaviorSet TransitionBehaviors { get; }
     public TransitionDirection TransitionDirection { get; }
@@ -73,6 +76,18 @@ internal record TransitingMethodParameter
             TransitionBehavior.Generate => TransitionAction.GenerateValue(transitionKind, generationUnit),
             _ => throw new InvalidOperationException($"Couldn't transit value {this}")
         };
+    }
+
+    public string GetNativeTransitExpression()
+    {
+        if (TransitionAction.NeedsCppToCTransformation)
+        {
+            return $"FumoCement::passAsC({IntermediateName})";
+        }
+        else
+        {
+            return IntermediateName;
+        }
     }
 
     public MethodParameter<JavaType>? AsJavaParameter() =>

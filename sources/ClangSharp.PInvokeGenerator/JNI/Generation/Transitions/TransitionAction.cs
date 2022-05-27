@@ -8,6 +8,7 @@ namespace ClangSharp.JNI.Generation.Transitions;
 internal abstract class TransitionAction
 {
     public virtual bool NeedsIntermediateReturnValue => false;
+    public virtual bool NeedsCppToCTransformation => false;
 
     public abstract GeneratedExpression TransitValue(string valueExpression,
         TransitionKind transitionKind, MethodGenerationUnit generationUnit);

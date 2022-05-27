@@ -145,62 +145,6 @@ namespace ClangSharp.JNI.Java
             WriteBlockEnd();
         }
 
-        private void GenerateCallback(JavaCallbackGenerationInfo callback)
-        {
-            var generationSet = callback.CallbackGenerationSet;
-
-            WriteIndentedLine($"public interface {callback.CallbackInterface}");
-            WriteBlockStart();
-
-            WriteBodylessMethod(generationSet.UpstreamInterfaceMethod, null);
-            WriteNewLine();
-
-            BeginFullJavaMethod(generationSet.CallbackCallMethod);
-
-            var parameterPasses = generationSet.UpstreamParameterPasses;
-            var callbackCallMethod = generationSet.CallbackCallMethod;
-            var interfaceMethod = generationSet.UpstreamInterfaceMethod;
-            var callbackObject = generationSet.CallbackCallMethod.Parameters[0].Name;
-
-            for (var i = 0; i < parameterPasses.Count; i++)
-            {
-                var parameterPass = parameterPasses[i];
-                var parameterType = interfaceMethod.Parameters[i].Type;
-
-                WriteIndentedLine($"{parameterType.AsString} {parameterPass.IntermediateVariableName} = ");
-                Write(PassToJava(parameterPass));
-                Write(';');
-            }
-
-            var returnPass = generationSet.UpstreamReturnValuePass;
-            var hasReturnValue = returnPass != null;
-
-            WriteNewLine();
-            WriteIndentation();
-            if (hasReturnValue)
-            {
-                Write($"{callbackCallMethod.ReturnType} {returnPass.ValueToPass} = ");
-            }
-
-            // Call the native method.
-            Write(callbackObject);
-            Write(".");
-            Write(interfaceMethod.Name);
-            WriteMethodArgumentsFromIntermediate(parameterPasses);
-            Write(";");
-
-            if (hasReturnValue)
-            {
-                WriteIndentedLine("return ");
-                Write(PassToJni(returnPass));
-                Write(";");
-            }
-
-            EndFullJavaMethod();
-
-            WriteBlockEnd();
-        }
-
         private void GenerateDownstreamMethod(DownstreamMethodGenerationUnit methodGen)
         {
             var nativeMethod = methodGen.JavaNativeMethod;
@@ -232,77 +176,6 @@ namespace ClangSharp.JNI.Java
 
             EndFullJavaMethod();
         }
-
-        private string PassToJava(ValuePass pass)
-        {
-            return pass switch {
-                PassPrimitive or PassPointerAsJLongToPtr or PassEnumValueAsValueTypeToEnum
-                    => ((StandaloneValuePass)pass).ValueToPass,
-
-                PassNestedStructAsJLongPointerToStructPtr passStruct
-                    => $"{passStruct.JavaStructName}.getTrackedAndUnowned({passStruct.ValueToPass})",
-
-                PassStructAsJLongPointerToStructCopy passStruct
-                    => $"{passStruct.JavaStructName}.getTrackedAndOwned({passStruct.ValueToPass})",
-
-                PassStringAsJByteArrayToCharPtr passString
-                    => $"{passString.ValueToPass} == null ? null : new String({passString.ValueToPass})",
-
-                PassStringDeletionEnumAsBool
-                    => throw UnsupportedPass("Cannot pass a StringDeletionEnum to Java.", pass),
-
-                _ => throw UnsupportedPass(pass)
-            };
-        }
-
-        private string PassToJni(ValuePass pass)
-        {
-            return pass switch {
-                PassPrimitive or
-                    PassPointerAsJLongToPtr or
-                    PassEnumValueAsValueTypeToEnum
-                    => ((StandaloneValuePass)pass).ValueToPass,
-
-                PassNestedStructAsJLongPointerToStructPtr or
-                    PassStructAsJLongPointerToStructCopy or
-                    PassFunctionPointerAsContextPtr
-                    => $"{((StandaloneValuePass)pass).ValueToPass}.getHandle()",
-
-                PassStringAsJByteArrayToCharPtr passString
-                    => $"{passString.ValueToPass}.getBytes()",
-
-                PassStringDeletionEnumAsBool passStringDeletionEnum
-                    => $"{passStringDeletionEnum.ValueToPass}.isDeletingString()",
-
-                PassStructHandleAsJLong
-                    => "getHandle()",
-
-                _ => throw UnsupportedPass(pass)
-            };
-        }
-
-        /*CODE TO RESTORE
-        private void WriteStructFieldOffsetConstant(in StructFieldGenInfo structField, out string fieldName)
-        {
-            fieldName = null;
-
-            // TODO: Implement something in C++ to make this work.
-            var offset = -1;
-            if (offset == -1)
-            {
-                return;
-            }
-
-            fieldName = JavaConventions.ToScreamingCase(structField.EscapedName) + "_OFFSET";
-            WriteIndentedLine($"private static final int {fieldName} = {offset};");
-        }
-
-        private void WriteStructFieldValueObjectCache(in StructFieldGenInfo structField, string annotatedActualType, out string fieldName)
-        {
-            fieldName = structField.EscapedName + "ValueObjectCache";
-            WriteIndentedLine($"private {annotatedActualType} {fieldName};");
-        }
-        */
 
         // TODO: Move visibility to method
         private void WriteBodylessMethod(BodylessJavaMethod method, string visibility)
@@ -349,56 +222,6 @@ namespace ClangSharp.JNI.Java
         private void EndFullJavaMethod()
         {
             WriteBlockEnd();
-        }
-
-        private string BuildMethodCallExpression(string name, IReadOnlyList<string> arguments)
-        {
-            var builder = new StringBuilder();
-            builder.Append(name);
-            builder.Append('(');
-            for (var i = 0; i < arguments.Count; i++)
-            {
-                var argument = arguments[i];
-                builder.Append(argument);
-                if (i != arguments.Count - 1)
-                {
-                    builder.Append(", ");
-                }
-            }
-
-            builder.Append(')');
-            return builder.ToString();
-        }
-
-        private string BuildMethodCallExpression(string name, IEnumerable<TransitingMethodParameter> arguments)
-        {
-            return BuildMethodCallExpression(name, arguments.Select(x => x.IntermediateName).ToArray());
-        }
-
-        private void WriteMethodArguments(IReadOnlyList<string> arguments)
-        {
-            Write("(");
-            for (var i = 0; i < arguments.Count; i++)
-            {
-                var argument = arguments[i];
-                Write(argument);
-                if (i != arguments.Count - 1)
-                {
-                    Write(", ");
-                }
-            }
-
-            Write(")");
-        }
-
-        private void WriteMethodArgumentsFromIntermediate(IReadOnlyList<ValuePass> parameterPasses)
-        {
-            WriteMethodArguments(parameterPasses.Select(x => x.IntermediateVariableName).ToArray());
-        }
-
-        private void WriteMethodArgumentsFromIntermediate(IReadOnlyList<TransitingMethodParameter> parameters)
-        {
-            WriteMethodArguments(parameters.Select(x => x.IntermediateName).ToArray());
         }
 
         private void WriteMethodParameters(IReadOnlyList<MethodParameter<JavaType>> parameters)

@@ -11,11 +11,9 @@ internal sealed class PrimitiveValueTransition : TransitionAction
         TransitionKind transitionKind, MethodGenerationUnit generationUnit)
     {
         return transitionKind switch {
-            TransitionKind.JavaToJni or
-                TransitionKind.JniToJava or
-                TransitionKind.JniToNative or
-                TransitionKind.NativeToJni => $"{valueExpression}",
-
+            TransitionKind.JavaToJni or TransitionKind.JniToJava => $"{valueExpression}",
+            TransitionKind.JniToNative => $"FumoCement::toNativePrimitive({valueExpression})",
+            TransitionKind.NativeToJni => $"FumoCement::toJavaPrimitive({valueExpression})",
             _ => throw new UnsupportedJniScenarioException()
         };
     }

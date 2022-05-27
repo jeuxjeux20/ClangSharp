@@ -19,7 +19,7 @@ internal abstract class MethodGenerationUnit : GenerationUnit
         ReturnValueLinkage = returnValueLinkage;
         ParameterLinkages = parameterLinkages.ToImmutableArray();
 
-        AllParameters = ExtractAllParameters(ParameterLinkages);
+        AllParameters = ExtractAllParameters();
     }
 
     public NativeOperation NativeOperation { get; }
@@ -28,16 +28,19 @@ internal abstract class MethodGenerationUnit : GenerationUnit
     public ImmutableArray<MethodParameterLinkage> ParameterLinkages { get; }
     public ImmutableArray<TransitingMethodParameter> AllParameters { get; }
 
-    private static ImmutableArray<TransitingMethodParameter> ExtractAllParameters(
-        ImmutableArray<MethodParameterLinkage> parameterLinkages)
+    private ImmutableArray<TransitingMethodParameter> ExtractAllParameters()
     {
-        var builder = ImmutableArray.CreateBuilder<TransitingMethodParameter>(parameterLinkages.Length);
-        foreach (var linkage in parameterLinkages)
+        var builder = ImmutableArray.CreateBuilder<TransitingMethodParameter>(
+            ParameterLinkages.Length + ReturnValueLinkage?.GeneratedParameters.Count ?? 0);
+
+        foreach (var linkage in ParameterLinkages)
         {
-            foreach (var parameter in linkage.GeneratedParameters)
-            {
-                builder.Add(parameter);
-            }
+            builder.AddRange(linkage.GeneratedParameters);
+        }
+
+        if (ReturnValueLinkage?.GeneratedParameters is { } returnParams)
+        {
+            builder.AddRange(returnParams);
         }
 
         return builder.Capacity == builder.Count ? builder.MoveToImmutable() : builder.ToImmutableArray();
@@ -58,10 +61,11 @@ internal abstract class MethodGenerationUnit : GenerationUnit
         return builder.ToImmutable();
     }
 
-    public ImmutableArray<TransitingMethodParameter> GetTransitingParameters(TransitionKind transitionKind)
+    public ImmutableArray<TransitingMethodParameter> GetSortedTransitingParameters(TransitionKind transitionKind)
     {
         return AllParameters
             .Where(parameter => parameter.TransitionBehaviors.Supports(transitionKind))
+            .OrderBy(x => x.IntermediateOrdering)
             .ToImmutableArray();
     }
 }

@@ -23,7 +23,7 @@ internal static class JavaConstructs
             ? TransitionKind.JniToJava
             : TransitionKind.JavaToJni;
 
-        var parameters = methodGen.GetTransitingParameters(parameterTransition);
+        var parameters = methodGen.GetSortedTransitingParameters(parameterTransition);
         foreach (var parameter in parameters)
         {
             writer.WriteIndentedLine($"{GetParameterType(parameter)} {parameter.IntermediateName} = ");
@@ -36,7 +36,7 @@ internal static class JavaConstructs
         string MakeFinalMethodCall()
         {
             return new StringBuilder()
-                .AppendMethodCallExpression(finalMethod, parameters)
+                .AppendMethodCallExpression(finalMethod, parameters, p => p.IntermediateName)
                 .ToString();
         }
 

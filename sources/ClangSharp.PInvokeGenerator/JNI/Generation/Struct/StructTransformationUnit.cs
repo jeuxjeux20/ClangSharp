@@ -33,13 +33,13 @@ internal class StructTransformationUnit : TransformationUnit<StructTarget>
 
             var getGen = DownstreamMethodGenerationUnit.UseLinker(
                 new DownstreamMethodLinker(getOp, context),
-                new DownstreamMethodGenerationProperties(getterName, getterName + "$Raw", target.JavaStructType, true),
+                new DownstreamMethodGenerationProperties(getterName, getterName + "Raw", target.JavaStructType, true),
                 out var getTransformUnits);
             transformationUnitsBuilder.AddRange(getTransformUnits);
 
             var setGen = DownstreamMethodGenerationUnit.UseLinker(
                 new DownstreamMethodLinker(setOp, context),
-                new DownstreamMethodGenerationProperties(setterName, setterName + "$Raw", target.JavaStructType, true),
+                new DownstreamMethodGenerationProperties(setterName, setterName + "Raw", target.JavaStructType, true),
                 out var setTransformUnits);
             transformationUnitsBuilder.AddRange(setTransformUnits);
 

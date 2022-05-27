@@ -64,7 +64,9 @@ internal abstract class MethodLinker
         // concerning a function pointer, use it.
         if (_nextFunctionPointerContextLink is not null)
         {
-            return _nextFunctionPointerContextLink.AsParameter(parameter, _transitionDirection);
+            var param = _nextFunctionPointerContextLink.AsParameter(parameter, _transitionDirection);
+            _nextFunctionPointerContextLink = null;
+            return param;
         }
 
         return parameter switch {
@@ -114,33 +116,44 @@ internal abstract class MethodLinker
         // | double    | jdouble     | 64 bits          |
         // | void      | void        | N/A              |
         // +-----------+-------------+------------------+
-        // (We're assuming a 64-bit system.)
 
-        var jniType = type.Kind switch {
-            CXTypeKind.CXType_Bool => JniType.JBoolean,
 
-            CXTypeKind.CXType_Char_U or
-                CXTypeKind.CXType_UChar or
-                CXTypeKind.CXType_SChar or
-                CXTypeKind.CXType_Char_S => JniType.JByte,
+        JniType jniType;
+        if (type.AsRawString is "size_t" or "usize_t")
+        {
+            // (We're assuming a 64-bit system.)
+            // This is to alleviate an issue with headers giving unsigned int instead of unsigned long long
+            // for size_t.
+            jniType = JniType.JLong;
+        }
+        else
+        {
+            jniType = type.Kind switch {
+                CXTypeKind.CXType_Bool => JniType.JBoolean,
 
-            CXTypeKind.CXType_UShort or
-                CXTypeKind.CXType_Char16 => JniType.JChar,
+                CXTypeKind.CXType_Char_U or
+                    CXTypeKind.CXType_UChar or
+                    CXTypeKind.CXType_SChar or
+                    CXTypeKind.CXType_Char_S => JniType.JByte,
 
-            CXTypeKind.CXType_Int or
-                CXTypeKind.CXType_UInt or
-                CXTypeKind.CXType_Char32 or
-                CXTypeKind.CXType_WChar => JniType.JInt,
+                CXTypeKind.CXType_UShort or
+                    CXTypeKind.CXType_Char16 => JniType.JChar,
 
-            CXTypeKind.CXType_Long or
-                CXTypeKind.CXType_ULong or
-                CXTypeKind.CXType_LongLong or
-                CXTypeKind.CXType_ULongLong => JniType.JLong,
+                CXTypeKind.CXType_Int or
+                    CXTypeKind.CXType_UInt or
+                    CXTypeKind.CXType_Char32 or
+                    CXTypeKind.CXType_WChar => JniType.JInt,
 
-            CXTypeKind.CXType_Float => JniType.JFloat,
-            CXTypeKind.CXType_Double => JniType.JDouble,
-            _ => throw UnsupportedJniScenarioException.UnsupportedType(type)
-        };
+                CXTypeKind.CXType_Long or
+                    CXTypeKind.CXType_ULong or
+                    CXTypeKind.CXType_LongLong or
+                    CXTypeKind.CXType_ULongLong => JniType.JLong,
+
+                CXTypeKind.CXType_Float => JniType.JFloat,
+                CXTypeKind.CXType_Double => JniType.JDouble,
+                _ => throw UnsupportedJniScenarioException.UnsupportedType(type)
+            };
+        }
 
         var javaType = jniType.AsJavaNonObject();
 
@@ -191,7 +204,7 @@ internal abstract class MethodLinker
         }
 
         var value = new LinkedValue(new CharPointerStringValueTransition(stringDeletionParameter?.Name)) {
-            JavaType = JavaType.ByteArray,
+            JavaType = JavaType.String,
             JniType = JniType.JByteArray,
             NativeType = type,
             ExtraGeneratedParameters = stringDeletionParameter is not null
@@ -302,6 +315,7 @@ internal abstract class MethodLinker
         return new LinkedValue(new CastFunctionPointerContextTransition()) {
             NativeType = PointerTypeDesc.VoidPointer,
             IsExceptionalParameter = true,
+            IntermediateOrdering = -1,
             TransitionBehaviors = new TransitionBehaviorSet { NativeToJni = TransitionBehavior.Transit }
         };
     }
@@ -344,6 +358,7 @@ internal abstract class MethodLinker
         public TypeDesc? NativeType { get; init; } = null;
 
         public string? IntermediateName { get; init; } = null;
+        public int IntermediateOrdering { get; init; } = 0;
 
         public TransitionBehaviorSet? TransitionBehaviors { get; init; } = null;
         public bool IsExceptionalParameter { get; init; } = false;
@@ -366,7 +381,7 @@ internal abstract class MethodLinker
         {
             var newParameter = new TransitingMethodParameter(parameter.Name, JavaType, JniType, NativeType,
                 TransitionAction, direction, JavaJniType, IntermediateName, TransitionBehaviors,
-                IsExceptionalParameter);
+                IsExceptionalParameter, IntermediateOrdering);
 
             return new MethodParameterLinkage(parameter, newParameter, ExtraGeneratedParameters);
         }

@@ -12,6 +12,7 @@ using ClangSharp.JNI.Generation.Enum;
 using ClangSharp.JNI.Generation.Method;
 using ClangSharp.JNI.Generation.Struct;
 using ClangSharp.JNI.Java;
+using ClangSharp.JNI.JNIGlue;
 
 namespace ClangSharp.JNI
 {
@@ -42,15 +43,6 @@ namespace ClangSharp.JNI
             Namespace = configuration.DefaultNamespace;
             GenerationContext = new JniGenerationContext(Namespace, configuration.MethodClassName);
         }
-
-        protected static UnsupportedJniScenarioException UnsupportedType<T>(T type)
-            => new($"Type not supported: {type}.");
-
-        protected static UnsupportedJniScenarioException UnsupportedPass(string message, ValuePass valuePass)
-            => new($"Cannot handle {valuePass}: {message}");
-
-        protected static UnsupportedJniScenarioException UnsupportedPass(ValuePass valuePass)
-            => new($"Cannot handle {valuePass} in this scenario.");
 
         public abstract string Extension { get; }
         public abstract bool IsTestOutput { get; }
@@ -221,7 +213,7 @@ namespace ClangSharp.JNI
                 var @enum = new EnumTarget(_preliminaryEnum.JavaName, _preliminaryEnum.Constants.ToImmutableArray());
                 GenerationContext.AddTransformationUnit(new EnumTransformationUnit(@enum));
             }
-            catch (UnsupportedJniScenarioException e)
+            catch (Exception e)
             {
                 Console.WriteLine($"Failed to transform enum {_preliminaryEnum.JavaName}: {e.Message}");
             }
@@ -383,7 +375,7 @@ namespace ClangSharp.JNI
                 GenerationContext.AddTransformationUnit(transformationUnit);
                 GenerationContext.AddTransformationUnits(generatedTransformationUnits);
             }
-            catch (UnsupportedJniScenarioException e)
+            catch (Exception e)
             {
                 Console.WriteLine($"Failed to transform function {_preliminaryFunction.NativeName}: {e.Message}");
             }
@@ -440,7 +432,7 @@ namespace ClangSharp.JNI
                 GenerationContext.AddTransformationUnit(transformationUnit);
                 GenerationContext.AddTransformationUnits(generatedTransformationUnits);
             }
-            catch (UnsupportedJniScenarioException e)
+            catch (Exception e)
             {
                 Console.WriteLine($"Failed to transform struct {_preliminaryStruct.JavaName}: {e.Message}");
             }
