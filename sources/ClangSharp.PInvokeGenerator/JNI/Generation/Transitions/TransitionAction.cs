@@ -5,8 +5,10 @@ using ClangSharp.JNI.Generation.Method;
 
 namespace ClangSharp.JNI.Generation.Transitions;
 
-internal abstract class ValueTransition
+internal abstract class TransitionAction
 {
+    public virtual bool NeedsIntermediateReturnValue => false;
+
     public abstract GeneratedExpression TransitValue(string valueExpression,
         TransitionKind transitionKind, MethodGenerationUnit generationUnit);
 

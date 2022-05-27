@@ -7,8 +7,8 @@ using ClangSharp.JNI.Generation.Method;
 namespace ClangSharp.JNI.Generation.Struct;
 
 internal record GetStructFieldOperation(RecordTypeDesc StructType, TypeDesc FieldType, string FieldName)
-    : FinalOperation(FieldType,
-        ImmutableArray.Create<FinalOperationParameter>(new StructHandleParameter(StructType)))
+    : NativeOperation(FieldType,
+        ImmutableArray.Create<NativeOperationParameter>(new StructHandleParameter(StructType)))
 {
     public override string GenerateRunExpression(MethodGenerationUnit generationUnit)
     {

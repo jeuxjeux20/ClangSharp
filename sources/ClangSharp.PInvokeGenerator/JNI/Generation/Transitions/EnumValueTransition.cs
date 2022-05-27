@@ -5,7 +5,7 @@ using ClangSharp.JNI.Generation.Method;
 
 namespace ClangSharp.JNI.Generation.Transitions;
 
-internal class EnumValueTransition : ValueTransition
+internal class EnumValueTransition : TransitionAction
 {
     public EnumTypeDesc EnumType { get; }
 

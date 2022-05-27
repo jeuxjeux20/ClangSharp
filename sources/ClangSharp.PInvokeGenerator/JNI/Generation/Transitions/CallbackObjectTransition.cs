@@ -6,7 +6,7 @@ using ClangSharp.JNI.Generation.Method;
 
 namespace ClangSharp.JNI.Generation.Transitions;
 
-internal class CallbackObjectTransition : ValueTransition
+internal class CallbackObjectTransition : TransitionAction
 {
     public override GeneratedExpression TransitValue(string valueExpression, TransitionKind transitionKind,
         MethodGenerationUnit generationUnit)

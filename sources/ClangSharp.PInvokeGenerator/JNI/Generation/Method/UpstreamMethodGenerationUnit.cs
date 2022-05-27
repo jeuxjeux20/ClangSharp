@@ -21,11 +21,11 @@ internal class UpstreamMethodGenerationUnit : MethodGenerationUnit
             generationProperties);
     }
 
-    public UpstreamMethodGenerationUnit(FinalOperation finalOperation,
+    public UpstreamMethodGenerationUnit(NativeOperation nativeOperation,
         MethodReturnValueLinkage? returnValueLinkage,
         IEnumerable<MethodParameterLinkage> parameterLinkages,
         UpstreamMethodGenerationProperties methodGenerationProperties)
-        : base(finalOperation, returnValueLinkage, parameterLinkages)
+        : base(nativeOperation, returnValueLinkage, parameterLinkages)
     {
         JniCallbackCallerLambda = new NativeMethod(
             "*lambda_function*",

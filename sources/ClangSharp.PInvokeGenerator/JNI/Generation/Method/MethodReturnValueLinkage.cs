@@ -13,22 +13,25 @@ internal record MethodReturnValueLinkage
 {
     public JavaType JavaType { get; }
     public JniType JniType { get; }
+    public JavaType JavaJniType { get; }
     public TypeDesc NativeType { get; }
-    public ValueTransition TransitionBehavior { get; }
+    public TransitionAction TransitionAction { get; }
 
     public IReadOnlyList<TransitingMethodParameter> GeneratedParameters { get; }
 
     public GeneratedExpression TransitValue(string expression,
         TransitionKind transitionKind, MethodGenerationUnit generationUnit)
-        => TransitionBehavior.TransitValue(expression, transitionKind, generationUnit);
+        => TransitionAction.TransitValue(expression, transitionKind, generationUnit);
 
     public MethodReturnValueLinkage(JavaType javaType, JniType jniType, TypeDesc nativeType,
-        ValueTransition transitionBehavior, IEnumerable<TransitingMethodParameter> generatedParameters)
+        TransitionAction transitionAction, IEnumerable<TransitingMethodParameter> generatedParameters,
+        JavaType? javaJniType = null)
     {
         JavaType = javaType;
         JniType = jniType;
         NativeType = nativeType;
-        TransitionBehavior = transitionBehavior;
+        JavaJniType = javaJniType ?? JniType.AsJavaNonObject();
+        TransitionAction = transitionAction;
         GeneratedParameters = generatedParameters.ToArray();
     }
 }

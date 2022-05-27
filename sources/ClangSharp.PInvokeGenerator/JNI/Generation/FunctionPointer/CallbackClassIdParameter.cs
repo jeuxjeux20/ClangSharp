@@ -6,4 +6,4 @@ using ClangSharp.JNI.Java;
 namespace ClangSharp.JNI.Generation.FunctionPointer;
 
 internal record CallbackClassIdParameter()
-    : FinalOperationParameter(JniType.JClassId.AsNative(), "func$classId");
+    : NativeOperationParameter(JniType.JClassId.AsNative(), "func$classId");

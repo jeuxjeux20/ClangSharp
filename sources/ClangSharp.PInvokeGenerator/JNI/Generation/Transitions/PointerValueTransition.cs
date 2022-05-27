@@ -6,7 +6,7 @@ using ClangSharp.JNI.Generation.Method;
 
 namespace ClangSharp.JNI.Generation.Transitions;
 
-internal sealed class PointerValueTransition : ValueTransition
+internal sealed class PointerValueTransition : TransitionAction
 {
     public PointerTypeDesc PointerType { get; }
 

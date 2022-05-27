@@ -5,7 +5,7 @@ using ClangSharp.JNI.Generation.Method;
 
 namespace ClangSharp.JNI.Generation.Transitions;
 
-internal sealed class PrimitiveValueTransition : ValueTransition
+internal sealed class PrimitiveValueTransition : TransitionAction
 {
     public override GeneratedExpression TransitValue(string valueExpression,
         TransitionKind transitionKind, MethodGenerationUnit generationUnit)

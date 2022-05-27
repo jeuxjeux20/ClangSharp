@@ -9,10 +9,11 @@ namespace ClangSharp.JNI.Generation.FunctionPointer;
 internal record FunctionPointerTarget(string MethodName, string ArgName, FunctionProtoTypeDesc Type)
     : TransformationTarget
 {
-    public static FunctionPointerTarget FromFinalOperation(FinalOperation operation, FinalOperationParameter parameter)
+    public static FunctionPointerTarget FromParentNativeOperation(NativeOperation operation,
+        NativeOperationParameter parameter)
     {
         var methodName = operation switch {
-            CallNativeMethodFinalOperation methodOperation => methodOperation.Method.Name,
+            CallNativeMethodOperation methodOperation => methodOperation.Method.Name,
             GetStructFieldOperation getOperation => $"{getOperation.StructType.Name}_{getOperation.FieldName}Get",
             SetStructFieldOperation setOperation => $"{setOperation.StructType.Name}_{setOperation.FieldName}Set",
             _ => operation.GetType().Name

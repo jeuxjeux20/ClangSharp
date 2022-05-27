@@ -33,7 +33,7 @@ internal static class CallbackCallerLambdaWriter
             writer.Write("return ");
         }
 
-        var expression = upstreamMethodGen.FinalOperation.GenerateRunExpression(upstreamMethodGen);
+        var expression = upstreamMethodGen.NativeOperation.GenerateRunExpression(upstreamMethodGen);
         if (returnValueLinkage is not null)
         {
             writer.Write(returnValueLinkage.TransitValue(expression, TransitionKind.JniToNative, upstreamMethodGen));

@@ -10,8 +10,8 @@ using ClangSharp.JNI.Java;
 
 namespace ClangSharp.JNI.Generation.FunctionPointer;
 
-internal record RunCallbackFinalOperation(FunctionProtoTypeDesc FunctionPointerType, ObjectJavaType JavaCallbackType)
-    : FinalOperation(FunctionPointerType.ReturnType, MakeParameters(FunctionPointerType, JavaCallbackType))
+internal record RunCallbackOperation(FunctionProtoTypeDesc FunctionPointerType, ObjectJavaType JavaCallbackType)
+    : NativeOperation(FunctionPointerType.ReturnType, MakeParameters(FunctionPointerType, JavaCallbackType))
 {
     public override string GenerateRunExpression(MethodGenerationUnit generationUnit)
     {
@@ -45,10 +45,10 @@ internal record RunCallbackFinalOperation(FunctionProtoTypeDesc FunctionPointerT
         return builder.ToString();
     }
 
-    private static ImmutableArray<FinalOperationParameter> MakeParameters(FunctionProtoTypeDesc functionPointerType,
+    private static ImmutableArray<NativeOperationParameter> MakeParameters(FunctionProtoTypeDesc functionPointerType,
         ObjectJavaType javaCallbackType)
     {
-        var builder = ImmutableArray.CreateBuilder<FinalOperationParameter>(functionPointerType.Parameters.Count + 3);
+        var builder = ImmutableArray.CreateBuilder<NativeOperationParameter>(functionPointerType.Parameters.Count + 3);
 
         builder.Add(new CallbackClassIdParameter());
         builder.Add(new CallbackMethodIdParameter());
@@ -57,7 +57,7 @@ internal record RunCallbackFinalOperation(FunctionProtoTypeDesc FunctionPointerT
         for (var i = 0; i < functionPointerType.Parameters.Count - 1; i++)
         {
             var parameter = functionPointerType.Parameters[i];
-            builder.Add(new FinalOperationParameter(parameter, $"proxyParam{i}"));
+            builder.Add(new NativeOperationParameter(parameter, $"proxyParam{i}"));
         }
 
         builder.Add(new CallbackContextParameter());

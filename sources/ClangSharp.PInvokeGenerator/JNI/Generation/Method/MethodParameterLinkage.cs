@@ -9,7 +9,7 @@ namespace ClangSharp.JNI.Generation.Method;
 
 internal class MethodParameterLinkage
 {
-    public MethodParameterLinkage(FinalOperationParameter targetParameter,
+    public MethodParameterLinkage(NativeOperationParameter targetParameter,
         TransitingMethodParameter transitingParameter,
         ImmutableArray<TransitingMethodParameter> extraParameters)
     {
@@ -18,7 +18,7 @@ internal class MethodParameterLinkage
         GeneratedParameters = extraParameters.Insert(0, transitingParameter);
     }
 
-    public FinalOperationParameter TargetParameter { get; }
+    public NativeOperationParameter TargetParameter { get; }
     public TransitingMethodParameter TransitingParameter { get; }
     public ImmutableArray<TransitingMethodParameter> GeneratedParameters { get; }
 }

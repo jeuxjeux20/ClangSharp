@@ -19,21 +19,21 @@ internal abstract class MethodLinker
     private readonly JniGenerationContext _context;
     private readonly List<TransformationUnit> _generatedTransformationUnits = new(0);
     private LinkedValue? _nextFunctionPointerContextLink = null;
-    private FinalOperationParameter? _currentParameter = null;
-    private readonly FinalOperation _operation;
+    private NativeOperationParameter? _currentParameter = null;
+    private readonly NativeOperation _operation;
     private readonly TransitionDirection _transitionDirection;
 
     private ValuePosition Position =>
         _currentParameter is null ? ValuePosition.ReturnType : ValuePosition.Parameter;
 
-    public MethodLinker(FinalOperation operation, JniGenerationContext context, TransitionDirection transitionDirection)
+    public MethodLinker(NativeOperation operation, JniGenerationContext context, TransitionDirection transitionDirection)
     {
         _context = context;
         _transitionDirection = transitionDirection;
         _operation = operation;
     }
 
-    public (FinalOperation operation, MethodReturnValueLinkage? returnValueLinkage,
+    public (NativeOperation operation, MethodReturnValueLinkage? returnValueLinkage,
         IReadOnlyList<MethodParameterLinkage> parameterLinkages) Apply(
             out ImmutableArray<TransformationUnit> generatedTransformationUnits)
     {
@@ -56,7 +56,7 @@ internal abstract class MethodLinker
         return LinkValue(_operation.ReturnType).AsReturnValue();
     }
 
-    public MethodParameterLinkage LinkParameter(FinalOperationParameter parameter)
+    public MethodParameterLinkage LinkParameter(NativeOperationParameter parameter)
     {
         _currentParameter = parameter;
 
@@ -186,7 +186,8 @@ internal abstract class MethodLinker
                 jniType: JniType.JBoolean,
                 nativeType: null,
                 new StringDeletionEnumValueTransition(),
-                _transitionDirection);
+                _transitionDirection,
+                isExceptionalParameter: true);
         }
 
         var value = new LinkedValue(new CharPointerStringValueTransition(stringDeletionParameter?.Name)) {
@@ -202,7 +203,7 @@ internal abstract class MethodLinker
 
     private static LinkedValue LinkPointer(PointerTypeDesc type)
     {
-        var annotation = $"@Pointer(\"{type.PointeeType.AsRawString}\")";
+        var annotation = $"@Pointer(\"{type.AsRawString}\")";
 
         return new LinkedValue(new PointerValueTransition(type)) {
             JavaType = JavaType.Long.WithAddedAnnotations(annotation), JniType = JniType.JLong, NativeType = type
@@ -214,18 +215,18 @@ internal abstract class MethodLinker
         var javaStructClass = JavaConventions.EscapeName(type.Name);
         var javaStructType = _context.NestedTypeInContainer(javaStructClass);
 
-        ValueTransition transition;
+        TransitionAction transitionAction;
         var isNestedStruct = _operation is GetStructFieldOperation or SetStructFieldOperation;
         if (isNestedStruct)
         {
-            transition = new NestedStructRefValueTransition(javaStructClass, type);
+            transitionAction = new NestedStructRefValueTransition(javaStructClass, type);
         }
         else
         {
-            transition = new StructCopyValueTransition(javaStructClass, type);
+            transitionAction = new StructCopyValueTransition(javaStructClass, type);
         }
 
-        return new LinkedValue(transition) { JavaType = javaStructType, JniType = JniType.JLong, NativeType = type };
+        return new LinkedValue(transitionAction) { JavaType = javaStructType, JniType = JniType.JLong, NativeType = type };
     }
 
     private LinkedValue LinkEnum(EnumTypeDesc type)
@@ -263,7 +264,7 @@ internal abstract class MethodLinker
                 $"The function pointer parameter '{_currentParameter.Name}' does not have a leading void* context parameter.");
         }
 
-        var target = FunctionPointerTarget.FromFinalOperation(_operation, _currentParameter);
+        var target = FunctionPointerTarget.FromParentNativeOperation(_operation, _currentParameter);
 
         var functionPointerUnit =
             new FunctionPointerTransformationUnit(target, _context, out var generatedTransformationUnits);
@@ -286,16 +287,14 @@ internal abstract class MethodLinker
 
     private static LinkedValue LinkStructHandle(StructHandleParameter structHandleParameter)
     {
-        var linkedValue =
-            new LinkedValue(new CurrentStructHandleValueTransition(structHandleParameter.StructType)) {
-                JniType = JniType.JLong,
-                NativeType = structHandleParameter.Type,
-                IntermediateName = "struct$ptr",
-                TransitionBehaviors = new TransitionBehaviorSet {
-                    JavaToJni = TransitionBehavior.Generate, JniToNative = TransitionBehavior.Transit
-                }
-            };
-        return linkedValue;
+        return new LinkedValue(new CurrentStructHandleValueTransition(structHandleParameter.StructType)) {
+            JniType = JniType.JLong,
+            NativeType = structHandleParameter.Type,
+            IntermediateName = "struct$ptr",
+            TransitionBehaviors = new TransitionBehaviorSet {
+                JavaToJni = TransitionBehavior.Generate, JniToNative = TransitionBehavior.Transit
+            }
+        };
     }
 
     private static LinkedValue LinkUpstreamCallbackContext()
@@ -329,11 +328,15 @@ internal abstract class MethodLinker
             JniType = JniType.JObject,
             JavaJniType = callbackObjectParameter.JavaCallbackType,
             IsExceptionalParameter = true,
-            TransitionBehaviors = new TransitionBehaviorSet { NativeToJni = TransitionBehavior.Generate }
+            TransitionBehaviors = new TransitionBehaviorSet {
+                NativeToJni = TransitionBehavior.Generate
+                // The JniToJava transition is handled separately.
+                // TODO: Don't hardcode this transition?
+            }
         };
     }
 
-    private record LinkedValue(ValueTransition ValueTransitionAction)
+    private record LinkedValue(TransitionAction TransitionAction)
     {
         public JavaType? JavaType { get; init; } = null;
         public JniType? JniType { get; init; } = null;
@@ -355,14 +358,14 @@ internal abstract class MethodLinker
                 throw new InvalidOperationException("Cannot partially generate a return value.");
             }
 
-            return new MethodReturnValueLinkage(JavaType, validJniType, NativeType, ValueTransitionAction,
-                ExtraGeneratedParameters);
+            return new MethodReturnValueLinkage(JavaType, validJniType, NativeType, TransitionAction,
+                ExtraGeneratedParameters, JavaJniType);
         }
 
-        public MethodParameterLinkage AsParameter(FinalOperationParameter parameter, TransitionDirection direction)
+        public MethodParameterLinkage AsParameter(NativeOperationParameter parameter, TransitionDirection direction)
         {
             var newParameter = new TransitingMethodParameter(parameter.Name, JavaType, JniType, NativeType,
-                ValueTransitionAction, direction, JavaJniType, IntermediateName, TransitionBehaviors,
+                TransitionAction, direction, JavaJniType, IntermediateName, TransitionBehaviors,
                 IsExceptionalParameter);
 
             return new MethodParameterLinkage(parameter, newParameter, ExtraGeneratedParameters);
@@ -378,7 +381,7 @@ internal abstract class MethodLinker
 
 internal sealed class DownstreamMethodLinker : MethodLinker
 {
-    public DownstreamMethodLinker(FinalOperation operation, JniGenerationContext context)
+    public DownstreamMethodLinker(NativeOperation operation, JniGenerationContext context)
         : base(operation, context, TransitionDirection.Downstream)
     {
     }
@@ -386,7 +389,7 @@ internal sealed class DownstreamMethodLinker : MethodLinker
 
 internal sealed class UpstreamMethodLinker : MethodLinker
 {
-    public UpstreamMethodLinker(FinalOperation operation, JniGenerationContext context)
+    public UpstreamMethodLinker(NativeOperation operation, JniGenerationContext context)
         : base(operation, context, TransitionDirection.Upstream)
     {
     }

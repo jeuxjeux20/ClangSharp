@@ -6,14 +6,14 @@ using ClangSharp.Abstractions;
 namespace ClangSharp.JNI.Generation.Method;
 
 #nullable enable
-internal abstract record FinalOperation(TypeDesc ReturnType, ImmutableArray<FinalOperationParameter> Parameters)
+internal abstract record NativeOperation(TypeDesc ReturnType, ImmutableArray<NativeOperationParameter> Parameters)
 {
     public abstract string GenerateRunExpression(MethodGenerationUnit generationUnit);
 }
 
-internal record FinalOperationParameter(TypeDesc Type, string Name)
+internal record NativeOperationParameter(TypeDesc Type, string Name)
 {
-    public FinalOperationParameter(MethodParameter<TypeDesc> parameter) : this(parameter.Type, parameter.Name)
+    public NativeOperationParameter(MethodParameter<TypeDesc> parameter) : this(parameter.Type, parameter.Name)
     {
     }
 }

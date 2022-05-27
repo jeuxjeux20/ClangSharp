@@ -6,7 +6,7 @@ using ClangSharp.JNI.Generation.Method;
 
 namespace ClangSharp.JNI.Generation.Transitions;
 
-internal sealed class CurrentStructHandleValueTransition : ValueTransition
+internal sealed class CurrentStructHandleValueTransition : TransitionAction
 {
     public RecordTypeDesc Struct { get; }
 

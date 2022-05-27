@@ -16,7 +16,7 @@ internal class FunctionPointerTransformationUnit : TransformationUnit<FunctionPo
     {
         InterfaceGenerationUnit = new CallbackInterfaceGenerationUnit(target, context);
 
-        var operation = new RunCallbackFinalOperation(target.Type, InterfaceGenerationUnit.JavaType);
+        var operation = new RunCallbackOperation(target.Type, InterfaceGenerationUnit.JavaType);
 
         MethodGenerationUnit = UpstreamMethodGenerationUnit.UseLinker(
             new UpstreamMethodLinker(operation, context),

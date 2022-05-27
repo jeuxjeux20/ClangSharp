@@ -5,7 +5,7 @@ using ClangSharp.JNI.Generation.Method;
 
 namespace ClangSharp.JNI.Generation.Transitions;
 
-internal class CallbackCallerLambdaTransition : ValueTransition
+internal class CallbackCallerLambdaTransition : TransitionAction
 {
     private readonly FunctionPointerTransformationUnit _functionPointerUnit;
 

@@ -4,4 +4,4 @@ using ClangSharp.JNI.Generation.Method;
 
 namespace ClangSharp.JNI.Generation.FunctionPointer;
 
-internal record CallbackMethodIdParameter() : FinalOperationParameter(JniType.JMethodId.AsNative(), "func$methodId");
+internal record CallbackMethodIdParameter() : NativeOperationParameter(JniType.JMethodId.AsNative(), "func$methodId");

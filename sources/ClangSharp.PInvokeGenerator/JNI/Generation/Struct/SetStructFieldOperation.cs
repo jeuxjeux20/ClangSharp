@@ -7,10 +7,10 @@ using ClangSharp.JNI.Generation.Method;
 namespace ClangSharp.JNI.Generation.Struct;
 
 internal record SetStructFieldOperation(RecordTypeDesc StructType, TypeDesc FieldType, string FieldName)
-    : FinalOperation(BuiltinTypeDesc.Void,
+    : NativeOperation(BuiltinTypeDesc.Void,
         ImmutableArray.Create(
             new StructHandleParameter(StructType),
-            new FinalOperationParameter(FieldType, "newValue")))
+            new NativeOperationParameter(FieldType, "newValue")))
 {
     public override string GenerateRunExpression(MethodGenerationUnit generationUnit)
     {

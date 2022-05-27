@@ -5,6 +5,6 @@ using ClangSharp.JNI.Generation.Method;
 
 namespace ClangSharp.JNI.Generation.FunctionPointer;
 
-internal record CallbackContextParameter() : FinalOperationParameter(
+internal record CallbackContextParameter() : NativeOperationParameter(
     new PointerTypeDesc(BuiltinTypeDesc.Void),
     JniGenerationNamings.Internal.CallbackLambdaJEnv);

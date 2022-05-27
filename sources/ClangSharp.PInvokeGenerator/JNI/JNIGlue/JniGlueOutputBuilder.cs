@@ -118,7 +118,7 @@ namespace ClangSharp.JNI.JNIGlue
                 Write("return ");
             }
 
-            var expression = methodGen.FinalOperation.GenerateRunExpression(methodGen);
+            var expression = methodGen.NativeOperation.GenerateRunExpression(methodGen);
             if (methodGen.ReturnValueLinkage is not null)
             {
                 Write(methodGen.ReturnValueLinkage.TransitValue(expression, TransitionKind.NativeToJni, methodGen));

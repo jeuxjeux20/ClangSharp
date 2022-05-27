@@ -5,7 +5,7 @@ using ClangSharp.JNI.Generation.Method;
 
 namespace ClangSharp.JNI.Generation.Transitions;
 
-internal class StructCopyValueTransition : ValueTransition
+internal class StructCopyValueTransition : TransitionAction
 {
     public string JavaStructClass { get; }
     public RecordTypeDesc NativeType { get; }

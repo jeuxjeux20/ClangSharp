@@ -16,7 +16,7 @@ internal record TransitingMethodParameter
         JavaType? javaType,
         JniType? jniType,
         TypeDesc? nativeType,
-        ValueTransition valueTransitionAction,
+        TransitionAction transitionAction,
         TransitionDirection transitionDirection,
         JavaType? javaJniType = null,
         string? intermediateName = null,
@@ -28,11 +28,11 @@ internal record TransitingMethodParameter
         JavaJniType = javaJniType ?? jniType?.AsJavaNonObject();
         JniType = jniType;
         NativeType = nativeType;
-        ValueTransitionAction = valueTransitionAction;
+        TransitionAction = transitionAction;
         TransitionDirection = transitionDirection;
         IntermediateName = intermediateName ?? name + "$int";
 
-        if (transitionBehaviors is {} validTransitionBehaviors)
+        if (transitionBehaviors is { } validTransitionBehaviors)
         {
             TransitionBehaviors = validTransitionBehaviors;
             if (!isExceptionalParameter)
@@ -62,15 +62,15 @@ internal record TransitingMethodParameter
     public JavaType? JavaType { get; }
     public JniType? JniType { get; }
     public TypeDesc? NativeType { get; }
-    public ValueTransition ValueTransitionAction { get; }
+    public TransitionAction TransitionAction { get; }
 
     public GeneratedExpression TransitOrGenerateValue(TransitionKind transitionKind,
         MethodGenerationUnit generationUnit)
     {
         var behavior = TransitionBehaviors.GetBehavior(transitionKind);
         return behavior switch {
-            TransitionBehavior.Transit => ValueTransitionAction.TransitValue(Name, transitionKind, generationUnit),
-            TransitionBehavior.Generate => ValueTransitionAction.GenerateValue(transitionKind, generationUnit),
+            TransitionBehavior.Transit => TransitionAction.TransitValue(Name, transitionKind, generationUnit),
+            TransitionBehavior.Generate => TransitionAction.GenerateValue(transitionKind, generationUnit),
             _ => throw new InvalidOperationException($"Couldn't transit value {this}")
         };
     }
@@ -113,7 +113,8 @@ internal record TransitingMethodParameter
         var endTransition = TransitionBehaviors.GetFinalTransition(TransitionDirection);
         if (endTransition == TransitionBehavior.None)
         {
-            throw new InvalidOperationException("The parameter doesn't have a valid ending transition.");
+            throw new InvalidOperationException(
+                $"The non-exceptional parameter {Name} doesn't have a valid ending transition.");
         }
     }
 

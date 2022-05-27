@@ -11,18 +11,18 @@ namespace ClangSharp.JNI.Generation.Method;
 
 internal abstract class MethodGenerationUnit : GenerationUnit
 {
-    protected MethodGenerationUnit(FinalOperation finalOperation,
+    protected MethodGenerationUnit(NativeOperation nativeOperation,
         MethodReturnValueLinkage? returnValueLinkage,
         IEnumerable<MethodParameterLinkage> parameterLinkages)
     {
-        FinalOperation = finalOperation;
+        NativeOperation = nativeOperation;
         ReturnValueLinkage = returnValueLinkage;
         ParameterLinkages = parameterLinkages.ToImmutableArray();
 
         AllParameters = ExtractAllParameters(ParameterLinkages);
     }
 
-    public FinalOperation FinalOperation { get; }
+    public NativeOperation NativeOperation { get; }
 
     public MethodReturnValueLinkage? ReturnValueLinkage { get; }
     public ImmutableArray<MethodParameterLinkage> ParameterLinkages { get; }

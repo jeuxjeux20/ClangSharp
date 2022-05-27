@@ -4,7 +4,7 @@ using ClangSharp.JNI.Generation.Method;
 
 namespace ClangSharp.JNI.Generation.Transitions;
 
-internal class FindCallbackMethodIdTransition : ValueTransition
+internal class FindCallbackMethodIdTransition : TransitionAction
 {
     public override GeneratedExpression TransitValue(string valueExpression, TransitionKind transitionKind,
         MethodGenerationUnit generationUnit)

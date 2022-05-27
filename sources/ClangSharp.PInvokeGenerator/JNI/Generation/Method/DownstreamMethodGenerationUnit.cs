@@ -27,11 +27,11 @@ internal class DownstreamMethodGenerationUnit : MethodGenerationUnit
     public BodylessJavaMethod JavaNativeMethod { get; }
     public JniGlueMethod JniProxyMethod { get; }
 
-    public DownstreamMethodGenerationUnit(FinalOperation finalOperation,
+    public DownstreamMethodGenerationUnit(NativeOperation nativeOperation,
         MethodReturnValueLinkage? returnValueLinkage,
         IEnumerable<MethodParameterLinkage> parameterLinkages,
         in DownstreamMethodGenerationProperties generationProperties)
-        : base(finalOperation, returnValueLinkage, parameterLinkages)
+        : base(nativeOperation, returnValueLinkage, parameterLinkages)
     {
         JavaMethod = new FullJavaMethod(
             generationProperties.JavaName,

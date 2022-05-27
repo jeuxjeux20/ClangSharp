@@ -5,7 +5,7 @@ using ClangSharp.JNI.Generation.Method;
 
 namespace ClangSharp.JNI.Generation.Transitions;
 
-internal class CastFunctionPointerContextTransition : ValueTransition
+internal class CastFunctionPointerContextTransition : TransitionAction
 {
     public override GeneratedExpression TransitValue(string valueExpression,
         TransitionKind transitionKind, MethodGenerationUnit generationUnit)

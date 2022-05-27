@@ -15,7 +15,7 @@ internal sealed class MethodTransformationUnit : TransformationUnit<MethodTarget
     public MethodTransformationUnit(MethodTarget target, JniGenerationContext context,
         out ImmutableArray<TransformationUnit> generatedTransformationUnits) : base(target)
     {
-        var operation = new CallNativeMethodFinalOperation(target.Method);
+        var operation = new CallNativeMethodOperation(target.Method);
         var methodName = target.Method.Name;
 
         MethodGenerationUnit = DownstreamMethodGenerationUnit.UseLinker(

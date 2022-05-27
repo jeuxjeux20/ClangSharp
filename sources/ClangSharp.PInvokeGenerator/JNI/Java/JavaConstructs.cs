@@ -1,6 +1,7 @@
 ﻿// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Text;
+using ClangSharp.JNI.Generation;
 using ClangSharp.JNI.Generation.Method;
 using ClangSharp.JNI.Generation.Transitions;
 
@@ -11,6 +12,13 @@ internal static class JavaConstructs
     public static void WriteMethodTransition(IIndentedWriter writer, MethodGenerationUnit methodGen,
         TransitionKind parameterTransition, string finalMethod)
     {
+        string GetParameterType(TransitingMethodParameter parameter)
+        {
+            return parameterTransition == TransitionKind.JavaToJni
+                ? parameter.JavaJniType!.ToString()
+                : parameter.JavaType!.ToString();
+        }
+
         var returnValueTransition = parameterTransition == TransitionKind.JavaToJni
             ? TransitionKind.JniToJava
             : TransitionKind.JavaToJni;
@@ -18,33 +26,51 @@ internal static class JavaConstructs
         var parameters = methodGen.GetTransitingParameters(parameterTransition);
         foreach (var parameter in parameters)
         {
-            writer.WriteIndentedLine($"{parameter.JavaJniType} {parameter.IntermediateName} = ");
+            writer.WriteIndentedLine($"{GetParameterType(parameter)} {parameter.IntermediateName} = ");
             writer.Write(parameter.TransitOrGenerateValue(parameterTransition, methodGen));
             writer.Write(';');
         }
 
-        var returnLinkage = methodGen.ReturnValueLinkage;
+        // Return values
 
-        writer.WriteNewLine();
-        writer.WriteIndentation();
-        if (returnLinkage is not null)
+        string MakeFinalMethodCall()
         {
-            writer.Write("return ");
+            return new StringBuilder()
+                .AppendMethodCallExpression(finalMethod, parameters)
+                .ToString();
         }
 
-        // Call the target method.
-        var finalMethodCall = new StringBuilder()
-            .AppendMethodCallExpression(finalMethod, parameters)
-            .ToString();
+        var returnLinkage = methodGen.ReturnValueLinkage;
+
+        writer.WriteIndentedLine();
         if (returnLinkage is not null)
         {
-            writer.Write(returnLinkage.TransitValue(finalMethodCall, returnValueTransition, methodGen));
+            string finalExpression;
+            if (returnLinkage.TransitionAction.NeedsIntermediateReturnValue)
+            {
+                var returnType = parameterTransition == TransitionKind.JavaToJni
+                    ? returnLinkage.JavaJniType
+                    : returnLinkage.JavaType;
+
+                writer.Write($"{returnType} {JniGenerationNamings.Internal.ReturnValueIntermediate} = ");
+                writer.Write(MakeFinalMethodCall());
+                writer.Write(";");
+                writer.WriteIndentedLine();
+
+                finalExpression = JniGenerationNamings.Internal.ReturnValueIntermediate;
+            }
+            else
+            {
+                finalExpression = MakeFinalMethodCall();
+            }
+            writer.Write("return ");
+            writer.Write(returnLinkage.TransitValue(finalExpression, returnValueTransition, methodGen));
+            writer.Write(";");
         }
         else
         {
-            writer.Write(finalMethodCall);
+            writer.Write(MakeFinalMethodCall());
+            writer.Write(";");
         }
-
-        writer.Write(";");
     }
 }

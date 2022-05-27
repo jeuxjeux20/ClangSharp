@@ -6,4 +6,4 @@ using ClangSharp.JNI.Generation.Method;
 namespace ClangSharp.JNI.Generation.Struct;
 
 internal record StructHandleParameter(RecordTypeDesc StructType)
-    : FinalOperationParameter(new PointerTypeDesc(StructType), "handle");
+    : NativeOperationParameter(new PointerTypeDesc(StructType), "handle");

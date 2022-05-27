@@ -6,7 +6,7 @@ using ClangSharp.JNI.Generation.Method;
 namespace ClangSharp.JNI.Generation.Transitions;
 
 #nullable enable
-internal class CharPointerStringValueTransition : ValueTransition
+internal class CharPointerStringValueTransition : TransitionAction
 {
     public string? StringDeletionParameterName { get; }
 
@@ -14,6 +14,8 @@ internal class CharPointerStringValueTransition : ValueTransition
     {
         StringDeletionParameterName = stringDeletionParameterName;
     }
+
+    public override bool NeedsIntermediateReturnValue => true;
 
     public override GeneratedExpression TransitValue(string valueExpression,
         TransitionKind transitionKind, MethodGenerationUnit generationUnit)

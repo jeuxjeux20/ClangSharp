@@ -9,8 +9,8 @@ using ClangSharp.Abstractions;
 namespace ClangSharp.JNI.Generation.Method;
 
 #nullable enable
-internal sealed record CallNativeMethodFinalOperation(NativeMethod Method)
-    : FinalOperation(Method.ReturnType, TransformToOperationParameters(Method.Parameters))
+internal sealed record CallNativeMethodOperation(NativeMethod Method)
+    : NativeOperation(Method.ReturnType, TransformToOperationParameters(Method.Parameters))
 {
     public override string GenerateRunExpression(MethodGenerationUnit generationUnit)
     {
@@ -20,13 +20,13 @@ internal sealed record CallNativeMethodFinalOperation(NativeMethod Method)
         return stringBuilder.ToString();
     }
 
-    private static ImmutableArray<FinalOperationParameter> TransformToOperationParameters(
+    private static ImmutableArray<NativeOperationParameter> TransformToOperationParameters(
         IReadOnlyList<MethodParameter<TypeDesc>> methodParameters)
     {
-        var builder = ImmutableArray.CreateBuilder<FinalOperationParameter>(methodParameters.Count);
+        var builder = ImmutableArray.CreateBuilder<NativeOperationParameter>(methodParameters.Count);
         foreach (var parameter in methodParameters)
         {
-            builder.Add(new FinalOperationParameter(parameter));
+            builder.Add(new NativeOperationParameter(parameter));
         }
         return builder.MoveToImmutable();
     }
