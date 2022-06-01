@@ -7,15 +7,14 @@ namespace ClangSharp.JNI.Generation;
 
 internal static class WellKnownJniTypes
 {
-    public static class Native
-    {
-        public static readonly PointerTypeDesc FunctionPointerContextPtr
-            = new(new RecordTypeDesc("FumoCement::FuctionPointerContext"));
-    }
-
     public static class Java
     {
+        public const string FumoCementPackage = "com.github.novelrt.fumocement";
+
         public static ObjectJavaType FunctionPointer(string callbackType)
-            => new("com.github.novelrt.fumocement", "FunctionPointer", new[] { callbackType });
+            => new(FumoCementPackage, "FunctionPointer", new[] { callbackType });
+
+        public static readonly ObjectJavaType StringDeletionBehaviour
+            = new(FumoCementPackage, "StringDeletionBehaviour");
     }
 }

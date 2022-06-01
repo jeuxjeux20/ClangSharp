@@ -1,5 +1,7 @@
 ﻿// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
+using System;
+using System.Collections.Immutable;
 using System.Text;
 using ClangSharp.JNI.Generation;
 using ClangSharp.JNI.Generation.Method;
@@ -7,10 +9,10 @@ using ClangSharp.JNI.Generation.Transitions;
 
 namespace ClangSharp.JNI.Java;
 
-internal static class JavaConstructs
+internal static class JavaTransitionWriter
 {
-    public static void WriteMethodTransition(IIndentedWriter writer, MethodGenerationUnit methodGen,
-        TransitionKind parameterTransition, string finalMethod)
+    public static void Write(IIndentedWriter writer, MethodGenerationUnit methodGen,
+        TransitionKind parameterTransition, Func<ImmutableArray<TransitingMethodParameter>, string> makeFinalMethodCall)
     {
         string GetParameterType(TransitingMethodParameter parameter)
         {
@@ -33,13 +35,6 @@ internal static class JavaConstructs
 
         // Return values
 
-        string MakeFinalMethodCall()
-        {
-            return new StringBuilder()
-                .AppendMethodCallExpression(finalMethod, parameters, p => p.IntermediateName)
-                .ToString();
-        }
-
         var returnLinkage = methodGen.ReturnValueLinkage;
 
         writer.WriteIndentedLine();
@@ -53,7 +48,7 @@ internal static class JavaConstructs
                     : returnLinkage.JavaType;
 
                 writer.Write($"{returnType} {JniGenerationNamings.Internal.ReturnValueIntermediate} = ");
-                writer.Write(MakeFinalMethodCall());
+                writer.Write(makeFinalMethodCall(parameters));
                 writer.Write(";");
                 writer.WriteIndentedLine();
 
@@ -61,15 +56,16 @@ internal static class JavaConstructs
             }
             else
             {
-                finalExpression = MakeFinalMethodCall();
+                finalExpression = makeFinalMethodCall(parameters);
             }
+
             writer.Write("return ");
             writer.Write(returnLinkage.TransitValue(finalExpression, returnValueTransition, methodGen));
             writer.Write(";");
         }
         else
         {
-            writer.Write(MakeFinalMethodCall());
+            writer.Write(makeFinalMethodCall(parameters));
             writer.Write(";");
         }
     }

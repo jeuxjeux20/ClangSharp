@@ -29,10 +29,14 @@ internal static class JniStringBuilderExtensions
     }
 
     public static StringBuilder AppendMethodCallExpression<T>(this StringBuilder builder, string name,
-        IReadOnlyList<T> arguments, Func<T, string> toString)
+        IReadOnlyList<T> arguments, Func<T, string> toString, bool removeOpeningParenthesis = false)
     {
         builder.Append(name);
-        builder.Append('(');
+        if (!removeOpeningParenthesis)
+        {
+            builder.Append('(');
+        }
+
         for (var i = 0; i < arguments.Count; i++)
         {
             var argument = arguments[i];
@@ -42,25 +46,13 @@ internal static class JniStringBuilderExtensions
                 builder.Append(", ");
             }
         }
-
         builder.Append(')');
         return builder;
     }
 
-    public static StringBuilder AppendMethodCallExpression(this StringBuilder builder, string name,
-        IReadOnlyList<string> arguments)
-    {
-        return AppendMethodCallExpression(builder, name, arguments, static x => x);
-    }
-
     public static StringBuilder AppendMethodParameters<T>(this StringBuilder builder, IReadOnlyList<T> parameters,
-        Func<T, string> toString)
+        Func<T, string> toString, bool removeOpeningParenthesis = false)
     {
-        return AppendMethodCallExpression(builder, "", parameters, toString);
-    }
-
-    public static StringBuilder AppendMethodParameters(this StringBuilder builder, IReadOnlyList<string> parameters)
-    {
-        return AppendMethodCallExpression(builder, "", parameters, static x => x);
+        return AppendMethodCallExpression(builder, "", parameters, toString, removeOpeningParenthesis);
     }
 }

@@ -12,7 +12,9 @@ internal sealed record JniGenerationNamings
 
     public static class Internal
     {
-        public const string CallbackLambdaJEnv = "func$$context";
+        public const string CallbackLambdaContext = "func$$context";
+        public const string CallbackLambdaClassId = "func$$classId";
+        public const string CallbackLambdaMethodId = "func$$methodId";
         public const string ReturnValueIntermediate = "returnValue$int";
     }
 }

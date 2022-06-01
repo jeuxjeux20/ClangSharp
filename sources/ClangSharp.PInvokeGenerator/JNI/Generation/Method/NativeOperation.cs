@@ -8,6 +8,14 @@ namespace ClangSharp.JNI.Generation.Method;
 #nullable enable
 internal abstract record NativeOperation(TypeDesc ReturnType, ImmutableArray<NativeOperationParameter> Parameters)
 {
+    public virtual void PreparePreIntermediateExpression(IIndentedWriter writer, MethodGenerationUnit generationUnit)
+    {
+    }
+
+    public virtual void PreparePostIntermediateExpression(IIndentedWriter writer, MethodGenerationUnit generationUnit)
+    {
+    }
+
     public abstract string GenerateRunExpression(MethodGenerationUnit generationUnit);
 }
 

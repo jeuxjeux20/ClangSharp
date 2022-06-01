@@ -102,33 +102,8 @@ namespace ClangSharp.JNI.JNIGlue
             var nativeMethod = methodGen.JniProxyMethod;
 
             BeginJniMethod(nativeMethod);
-            foreach (var parameter in methodGen.GetSortedTransitingParameters(TransitionKind.JniToNative))
-            {
-                var intermediateName = parameter.IntermediateName;
 
-                WriteIndentedLine($"auto&& {intermediateName} = ");
-                Write(parameter.TransitOrGenerateValue(TransitionKind.JniToNative, methodGen));
-                Write(';');
-            }
-
-            // Call the method (and put the return value in a variable if any)
-            WriteIndentedLine();
-            if (methodGen.ReturnValueLinkage is not null)
-            {
-                Write("return ");
-            }
-
-            var expression = methodGen.NativeOperation.GenerateRunExpression(methodGen);
-            if (methodGen.ReturnValueLinkage is not null)
-            {
-                Write(methodGen.ReturnValueLinkage.TransitValue(expression, TransitionKind.NativeToJni, methodGen));
-            }
-            else
-            {
-                Write(expression);
-            }
-
-            Write(";");
+            JniGlueTransitionWriter.Write(this, methodGen, TransitionKind.JniToNative);
 
             EndJniMethod();
         }

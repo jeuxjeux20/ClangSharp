@@ -73,12 +73,6 @@ internal abstract class MethodLinker
             StructHandleParameter structHandleParameter
                 => LinkStructHandle(structHandleParameter).AsParameter(parameter, _transitionDirection),
 
-            CallbackContextParameter => LinkUpstreamCallbackContext().AsParameter(parameter, _transitionDirection),
-
-            CallbackClassIdParameter => LinkUpstreamCallbackClassId().AsParameter(parameter, _transitionDirection),
-
-            CallbackMethodIdParameter => LinkUpstreamCallbackMethodId().AsParameter(parameter, _transitionDirection),
-
             CallbackObjectParameter callbackObj
                 => LinkUpstreamCallbackObject(callbackObj).AsParameter(parameter, _transitionDirection),
 
@@ -195,7 +189,7 @@ internal abstract class MethodLinker
                 : "returnValueDeletionBehaviour";
 
             stringDeletionParameter = new TransitingMethodParameter(parameterName,
-                javaType: FumoCementTypes.StringDeletionBehaviour,
+                javaType: WellKnownJniTypes.Java.StringDeletionBehaviour,
                 jniType: JniType.JBoolean,
                 nativeType: null,
                 new StringDeletionEnumValueTransition(),
@@ -310,43 +304,14 @@ internal abstract class MethodLinker
         };
     }
 
-    private static LinkedValue LinkUpstreamCallbackContext()
-    {
-        return new LinkedValue(new CastFunctionPointerContextTransition()) {
-            NativeType = PointerTypeDesc.VoidPointer,
-            IsExceptionalParameter = true,
-            IntermediateOrdering = -1,
-            TransitionBehaviors = new TransitionBehaviorSet { NativeToJni = TransitionBehavior.Transit }
-        };
-    }
-
-    private static LinkedValue LinkUpstreamCallbackClassId()
-    {
-        return new LinkedValue(new FindCallbackClassIdTransition()) {
-            IsExceptionalParameter = true,
-            TransitionBehaviors = new TransitionBehaviorSet { NativeToJni = TransitionBehavior.Generate }
-        };
-    }
-
-    private static LinkedValue LinkUpstreamCallbackMethodId()
-    {
-        return new LinkedValue(new FindCallbackMethodIdTransition()) {
-            IsExceptionalParameter = true,
-            TransitionBehaviors = new TransitionBehaviorSet { NativeToJni = TransitionBehavior.Generate }
-        };
-    }
-
     private static LinkedValue LinkUpstreamCallbackObject(CallbackObjectParameter callbackObjectParameter)
     {
         return new LinkedValue(new CallbackObjectTransition()) {
-            JniType = JniType.JObject,
+            JavaType = callbackObjectParameter.JavaCallbackType,
             JavaJniType = callbackObjectParameter.JavaCallbackType,
-            IsExceptionalParameter = true,
-            TransitionBehaviors = new TransitionBehaviorSet {
-                NativeToJni = TransitionBehavior.Generate
-                // The JniToJava transition is handled separately.
-                // TODO: Don't hardcode this transition?
-            }
+            JniType = JniType.JObject,
+            NativeType = PointerTypeDesc.VoidPointer,
+            IsJavaReceiver = true
         };
     }
 
@@ -362,6 +327,8 @@ internal abstract class MethodLinker
 
         public TransitionBehaviorSet? TransitionBehaviors { get; init; } = null;
         public bool IsExceptionalParameter { get; init; } = false;
+
+        public bool IsJavaReceiver { get; init; } = false;
 
         public ImmutableArray<TransitingMethodParameter> ExtraGeneratedParameters { get; init; }
             = ImmutableArray<TransitingMethodParameter>.Empty;
@@ -381,7 +348,7 @@ internal abstract class MethodLinker
         {
             var newParameter = new TransitingMethodParameter(parameter.Name, JavaType, JniType, NativeType,
                 TransitionAction, direction, JavaJniType, IntermediateName, TransitionBehaviors,
-                IsExceptionalParameter, IntermediateOrdering);
+                IsExceptionalParameter, IntermediateOrdering, IsJavaReceiver);
 
             return new MethodParameterLinkage(parameter, newParameter, ExtraGeneratedParameters);
         }

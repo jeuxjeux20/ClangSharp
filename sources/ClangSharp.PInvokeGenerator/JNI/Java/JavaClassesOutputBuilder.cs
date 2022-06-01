@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text;
@@ -155,7 +156,10 @@ namespace ClangSharp.JNI.Java
             BeginFullJavaMethod(publicMethod);
 
             var finalMethod = methodGen.JavaNativeMethod.Name;
-            JavaConstructs.WriteMethodTransition(this, methodGen, TransitionKind.JavaToJni, finalMethod);
+            JavaTransitionWriter.Write(this, methodGen, TransitionKind.JavaToJni,
+                parameters => new StringBuilder()
+                    .AppendMethodCallExpression(finalMethod, parameters, x => x.IntermediateName)
+                    .ToString());
 
             EndFullJavaMethod();
         }
@@ -169,10 +173,18 @@ namespace ClangSharp.JNI.Java
 
             BeginFullJavaMethod(callbackCallerMethod);
 
-            var callbackObjLink = methodGen.ParameterLinkages.First(x => x.TargetParameter is CallbackObjectParameter);
-            var callbackObjectParameter = callbackObjLink.TransitingParameter.Name;
-            var finalMethod = $"{callbackObjectParameter}.{callbackMethod.Name}";
-            JavaConstructs.WriteMethodTransition(this, methodGen, TransitionKind.JniToJava, finalMethod);
+            string MakeCallbackCall(ImmutableArray<TransitingMethodParameter> parameters)
+            {
+                var callbackObject = methodGen.CallbackObjectParameter.IntermediateName;
+                var finalMethod = $"{callbackObject}.{callbackMethod.Name}";
+
+                var parametersExceptCallback = parameters.Remove(methodGen.CallbackObjectParameter);
+                return new StringBuilder()
+                    .AppendMethodCallExpression(finalMethod, parametersExceptCallback, p => p.IntermediateName)
+                    .ToString();
+            }
+
+            JavaTransitionWriter.Write(this, methodGen, TransitionKind.JniToJava, MakeCallbackCall);
 
             EndFullJavaMethod();
         }
@@ -180,7 +192,7 @@ namespace ClangSharp.JNI.Java
         // TODO: Move visibility to method
         private void WriteBodylessMethod(BodylessJavaMethod method, string visibility)
         {
-            WriteIndentedLine("");
+            WriteIndentedLine();
             if (!string.IsNullOrEmpty(visibility))
             {
                 Write(visibility);
@@ -200,7 +212,7 @@ namespace ClangSharp.JNI.Java
             Write(method.ReturnType);
             Write(" ");
             Write(method.Name);
-            WriteMethodParameters(method.Parameters);
+            RawBuilder.AppendMethodParameters(method.Parameters, x => x.ToString());
             Write(";");
         }
 
@@ -215,32 +227,13 @@ namespace ClangSharp.JNI.Java
             Write(method.ReturnType);
             Write(" ");
             Write(method.Name);
-            WriteMethodParameters(method.Parameters);
+            RawBuilder.AppendMethodParameters(method.Parameters, x => x.ToString());
             WriteBlockStart();
         }
 
         private void EndFullJavaMethod()
         {
             WriteBlockEnd();
-        }
-
-        private void WriteMethodParameters(IReadOnlyList<MethodParameter<JavaType>> parameters)
-        {
-            Write("(");
-            for (var i = 0; i < parameters.Count; i++)
-            {
-                var parameter = parameters[i];
-                Write(parameter.Type.AsString);
-                Write(" ");
-                Write(parameter.Name);
-
-                if (i != parameters.Count - 1)
-                {
-                    Write(", ");
-                }
-            }
-
-            Write(")");
         }
     }
 }

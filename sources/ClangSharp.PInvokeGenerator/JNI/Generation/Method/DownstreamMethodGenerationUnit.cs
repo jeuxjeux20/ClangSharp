@@ -37,7 +37,7 @@ internal class DownstreamMethodGenerationUnit : MethodGenerationUnit
         JavaMethod = new FullJavaMethod(
             generationProperties.JavaName,
             returnValueLinkage?.JavaType ?? JavaType.Void,
-            FilterParameters(x => x.AsJavaParameter()),
+            FilterParameters(x => x.AsJavaParameter(nullsIfReceiver: false)),
             !generationProperties.IsJavaInstanceMethod);
 
         JavaNativeMethod = new BodylessJavaMethod(

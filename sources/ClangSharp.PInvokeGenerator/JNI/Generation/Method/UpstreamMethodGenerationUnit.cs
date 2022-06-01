@@ -43,12 +43,12 @@ internal class UpstreamMethodGenerationUnit : MethodGenerationUnit
         CallbackMethod = new BodylessJavaMethod(
             methodGenerationProperties.Namings.CallbackInterfaceMethod,
             returnValueLinkage?.JavaType ?? JavaType.Void,
-            FilterParameters(x => x.AsJavaParameter()),
+            FilterParameters(x => x.AsJavaParameter(nullsIfReceiver: true)),
             isNative: false,
             isStatic: false);
 
         CallbackType = methodGenerationProperties.CallbackType;
-        CallbackContextParameter = FindContextParameter();
+        CallbackObjectParameter = FindCallbackObjectParameter();
     }
 
     public NativeMethod JniCallbackCallerLambda { get; }
@@ -57,11 +57,11 @@ internal class UpstreamMethodGenerationUnit : MethodGenerationUnit
 
     public ObjectJavaType CallbackType { get; }
 
-    public TransitingMethodParameter CallbackContextParameter { get; }
+    public TransitingMethodParameter CallbackObjectParameter { get; }
 
-    private TransitingMethodParameter FindContextParameter()
+    private TransitingMethodParameter FindCallbackObjectParameter()
     {
-        return ParameterLinkages.First(x => x.TargetParameter is CallbackContextParameter).TransitingParameter;
+        return ParameterLinkages.First(x => x.TargetParameter is CallbackObjectParameter).TransitingParameter;
     }
 }
 

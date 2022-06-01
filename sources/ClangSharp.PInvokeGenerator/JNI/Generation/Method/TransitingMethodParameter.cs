@@ -22,7 +22,8 @@ internal record TransitingMethodParameter
         string? intermediateName = null,
         TransitionBehaviorSet? transitionBehaviors = null,
         bool isExceptionalParameter = false,
-        int intermediateOrdering = 0)
+        int intermediateOrdering = 0,
+        bool isJavaReceiver = false)
     {
         Name = name;
         JavaType = javaType;
@@ -33,6 +34,7 @@ internal record TransitingMethodParameter
         TransitionDirection = transitionDirection;
         IntermediateName = intermediateName ?? name + "$int";
         IntermediateOrdering = intermediateOrdering;
+        IsJavaReceiver = isJavaReceiver;
 
         if (transitionBehaviors is { } validTransitionBehaviors)
         {
@@ -53,7 +55,6 @@ internal record TransitingMethodParameter
         }
     }
 
-    public JavaType? JavaJniType { get; }
 
     public string IntermediateName { get; }
     public int IntermediateOrdering { get; }
@@ -63,9 +64,12 @@ internal record TransitingMethodParameter
 
     public string Name { get; }
     public JavaType? JavaType { get; }
+    public JavaType? JavaJniType { get; }
     public JniType? JniType { get; }
     public TypeDesc? NativeType { get; }
     public TransitionAction TransitionAction { get; }
+
+    public bool IsJavaReceiver { get; } = false;
 
     public GeneratedExpression TransitOrGenerateValue(TransitionKind transitionKind,
         MethodGenerationUnit generationUnit)
@@ -90,8 +94,10 @@ internal record TransitingMethodParameter
         }
     }
 
-    public MethodParameter<JavaType>? AsJavaParameter() =>
-        JavaType is not null ? new MethodParameter<JavaType>(JavaType, Name) : null;
+    public MethodParameter<JavaType>? AsJavaParameter(bool nullsIfReceiver) =>
+        JavaType is not null && (nullsIfReceiver ^ IsJavaReceiver)
+            ? new MethodParameter<JavaType>(JavaType, Name)
+            : null;
 
     public MethodParameter<JavaType>? AsJavaJniParameter() =>
         JavaJniType is not null ? new MethodParameter<JavaType>(JavaJniType, Name) : null;

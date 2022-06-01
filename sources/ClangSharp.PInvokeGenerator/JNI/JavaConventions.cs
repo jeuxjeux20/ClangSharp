@@ -37,7 +37,6 @@ namespace ClangSharp.JNI
             };
         }
 
-        public static string CPackageName(string @namespace) => @namespace.Replace(".", "_");
         public static string JniPackageName(string @namespace) => @namespace.Replace(".", "/");
 
         public static string Getter(string variableName, string cOrJavaType) => cOrJavaType switch {

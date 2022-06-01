@@ -76,6 +76,31 @@ namespace ClangSharp.JNI
             [JString] = JavaType.String,
         };
 
+        private static readonly Dictionary<JniType, JavaTypeKind> s_kindMap = new() {
+            [Void] = JavaTypeKind.Void,
+            [JBoolean] = JavaTypeKind.Boolean,
+            [JByte] = JavaTypeKind.Byte,
+            [JChar] = JavaTypeKind.Char,
+            [JShort] = JavaTypeKind.Short,
+            [JInt] = JavaTypeKind.Int,
+            [JLong] = JavaTypeKind.Long,
+            [JFloat] = JavaTypeKind.Float,
+            [JDouble] = JavaTypeKind.Double,
+            [JObject] = JavaTypeKind.Object,
+            [JObjectArray] = JavaTypeKind.Array,
+            [JBooleanArray] = JavaTypeKind.Array,
+            [JByteArray] = JavaTypeKind.Array,
+            [JCharArray] = JavaTypeKind.Array,
+            [JShortArray] = JavaTypeKind.Array,
+            [JIntArray] = JavaTypeKind.Array,
+            [JLongArray] = JavaTypeKind.Array,
+            [JFloatArray] = JavaTypeKind.Array,
+            [JDoubleArray] = JavaTypeKind.Array,
+            [JThrowable] = JavaTypeKind.Object,
+            [JClass] = JavaTypeKind.Object,
+            [JString] = JavaTypeKind.Object,
+        };
+
         public JavaType AsJavaNonObject()
         {
             if (!s_jniToJava.TryGetValue(this, out var javaType))
@@ -90,6 +115,8 @@ namespace ClangSharp.JNI
         {
             return s_jniToJava.GetValueOrDefault(this);
         }
+
+        public JavaTypeKind Kind => s_kindMap[this];
 
         // RecordTypeDesc isn't the best type to use, but being precise doesn't really matter here.
         public TypeDesc AsNative() => new RecordTypeDesc(Value);

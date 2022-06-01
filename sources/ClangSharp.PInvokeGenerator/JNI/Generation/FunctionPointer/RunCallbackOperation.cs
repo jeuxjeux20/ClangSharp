@@ -1,5 +1,6 @@
 ﻿// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
+using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -7,12 +8,48 @@ using System.Text;
 using ClangSharp.Abstractions;
 using ClangSharp.JNI.Generation.Method;
 using ClangSharp.JNI.Java;
+using static ClangSharp.JNI.Generation.JniGenerationNamings.Internal;
 
 namespace ClangSharp.JNI.Generation.FunctionPointer;
-
+#nullable enable
 internal record RunCallbackOperation(FunctionProtoTypeDesc FunctionPointerType, ObjectJavaType JavaCallbackType)
     : NativeOperation(FunctionPointerType.ReturnType, MakeParameters(FunctionPointerType, JavaCallbackType))
 {
+    public override void PreparePreIntermediateExpression(IIndentedWriter writer, MethodGenerationUnit generationUnit)
+    {
+        if (generationUnit is not UpstreamMethodGenerationUnit upstreamMethodGen)
+        {
+            throw new ArgumentException(null, nameof(generationUnit));
+        }
+
+        writer.WriteIndentedLine($"auto&& {CallbackLambdaContext} = " +
+                                 $"static_cast<FumoCement::FunctionPointerContext*>({upstreamMethodGen.CallbackObjectParameter.Name});");
+    }
+
+    public override void PreparePostIntermediateExpression(IIndentedWriter writer, MethodGenerationUnit generationUnit)
+    {
+        if (generationUnit is not UpstreamMethodGenerationUnit upstreamMethodGen)
+        {
+            throw new ArgumentException(null, nameof(generationUnit));
+        }
+
+        writer.WriteIndentedLine($"auto&& {CallbackLambdaClassId} = FumoCement::getCachedClass<");
+        writer.RawBuilder.AppendTemplateString(upstreamMethodGen.CallbackType.FullJniClass);
+        writer.Write(">(");
+        writer.Write(upstreamMethodGen.CallbackObjectParameter.IntermediateName);
+        writer.Write(");");
+
+        writer.WriteIndentedLine($"auto&& {CallbackLambdaClassId} = FumoCement::getCachedStaticMethod<");
+        writer.RawBuilder.AppendTemplateString(upstreamMethodGen.CallbackType.FullJniClass);
+        writer.Write(", ");
+        writer.RawBuilder.AppendTemplateString(upstreamMethodGen.CallbackCallerMethod.Name);
+        writer.Write(", ");
+        writer.RawBuilder.AppendTemplateString(upstreamMethodGen.CallbackCallerMethod.JniSignature);
+        writer.Write(">(");
+        writer.Write(upstreamMethodGen.CallbackObjectParameter.IntermediateName);
+        writer.Write(");");
+    }
+
     public override string GenerateRunExpression(MethodGenerationUnit generationUnit)
     {
         var returnLinkage = generationUnit.ReturnValueLinkage;
@@ -20,10 +57,9 @@ internal record RunCallbackOperation(FunctionProtoTypeDesc FunctionPointerType, 
 
         var builder = new StringBuilder();
 
-        // TODO: probably don't use JavaType?
         var contextParameter = parameterLinkages[^1].TransitingParameter.IntermediateName;
-        var method = returnLinkage?.JavaType switch {
-            null => "CallStaticVoidMethod",
+        var method = returnLinkage?.JniType switch {
+            null or { Kind: JavaTypeKind.Void } => "CallStaticVoidMethod",
             { Kind: JavaTypeKind.Object or JavaTypeKind.Array } => "CallStaticObjectMethod",
             { Kind: JavaTypeKind.Boolean } => "CallStaticBoolMethod",
             { Kind: JavaTypeKind.Byte } => "CallStaticByteMethod",
@@ -37,11 +73,11 @@ internal record RunCallbackOperation(FunctionProtoTypeDesc FunctionPointerType, 
         };
 
         // (context->getEnv())->CallStaticXMethod(arg1, arg2, arg3);
-        builder.Append('(');
-        builder.Append(contextParameter);
-        builder.Append("->getEnv())->");
-        builder.AppendMethodCallExpression(method, parameterLinkages.SkipLast(1).ToArray(),
-            linkage => linkage.TransitingParameter.GetNativeTransitExpression());
+        builder.Append($"({contextParameter}->getEnv())->{method}({CallbackLambdaClassId}, {CallbackLambdaMethodId}, ");
+
+        builder.AppendMethodParameters(parameterLinkages,
+            linkage => linkage.TransitingParameter.GetNativeTransitExpression(),
+            removeOpeningParenthesis: true);
 
         return builder.ToString();
     }
@@ -49,19 +85,14 @@ internal record RunCallbackOperation(FunctionProtoTypeDesc FunctionPointerType, 
     private static ImmutableArray<NativeOperationParameter> MakeParameters(FunctionProtoTypeDesc functionPointerType,
         ObjectJavaType javaCallbackType)
     {
-        var builder = ImmutableArray.CreateBuilder<NativeOperationParameter>(functionPointerType.Parameters.Count + 3);
-
-        builder.Add(new CallbackClassIdParameter());
-        builder.Add(new CallbackMethodIdParameter());
-        builder.Add(new CallbackObjectParameter(javaCallbackType));
+        var builder = ImmutableArray.CreateBuilder<NativeOperationParameter>(functionPointerType.Parameters.Count);
 
         for (var i = 0; i < functionPointerType.Parameters.Count - 1; i++)
         {
             var parameter = functionPointerType.Parameters[i];
             builder.Add(new NativeOperationParameter(parameter, $"proxyParam{i}"));
         }
-
-        builder.Add(new CallbackContextParameter());
+        builder.Add(new CallbackObjectParameter(javaCallbackType));
 
         return builder.MoveToImmutable();
     }
