@@ -8,6 +8,7 @@ using System.Text;
 using ClangSharp.Abstractions;
 using ClangSharp.CSharp;
 using ClangSharp.JNI.Generation;
+using ClangSharp.JNI.Generation.Configuration;
 using ClangSharp.JNI.Generation.Enum;
 using ClangSharp.JNI.Generation.Method;
 using ClangSharp.JNI.Generation.Struct;
@@ -32,28 +33,31 @@ namespace ClangSharp.JNI
         private PreliminaryFunction _preliminaryFunction;
         private PreliminaryStruct _preliminaryStruct;
 
+        private Queue<PreliminaryEnum> _enumQueue = new();
+        private Queue<PreliminaryStruct> _structQueue = new();
+        private Queue<PreliminaryFunction> _functionQueue = new();
+
         public bool IsUncheckedContext => true;
 
         protected JniOutputBuilderBase(string name, PInvokeGeneratorConfiguration configuration,
+            JniGenerationContext generationContext,
             string indentationString)
         {
             Name = name;
             _configuration = configuration;
             _indentationString = indentationString;
-            Namespace = configuration.DefaultNamespace;
-            GenerationContext = new JniGenerationContext(Namespace, configuration.MethodClassName);
+            GenerationContext = generationContext;
         }
 
         public abstract string Extension { get; }
         public abstract bool IsTestOutput { get; }
         public string Name { get; }
 
-        public string Namespace { get; }
-
         public string Content
         {
             get
             {
+                CreateTransformationUnits();
                 WriteContent();
                 var content = RawBuilder.ToString();
                 _ = RawBuilder.Clear();
@@ -132,6 +136,82 @@ namespace ClangSharp.JNI
             WriteIndentedLine("}");
         }
 
+        private void CreateTransformationUnits()
+        {
+            GenerationContext.NewRound();
+
+            while (_enumQueue.TryDequeue(out var @enum))
+            {
+                try
+                {
+                    var enumTarget = new EnumTarget(@enum.JavaName, @enum.Constants.ToImmutableArray());
+                    GenerationContext.AddTransformationUnit(new EnumTransformationUnit(enumTarget));
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine($"Failed to transform enum {_preliminaryEnum.JavaName}: {e.Message}");
+                }
+            }
+
+            while (_structQueue.TryDequeue(out var @struct))
+            {
+                try
+                {
+                    var target = new StructTarget(@struct.NativeName, @struct.Fields.ToImmutableArray());
+                    var rule = GenerationContext.Configuration.GetStructRule(target);
+
+                    if (rule.ShouldBeGenerated)
+                    {
+                        var transformationUnit =
+                            new StructTransformationUnit(target, rule, GenerationContext,
+                                out var generatedTransformationUnits);
+                        GenerationContext.AddTransformationUnit(transformationUnit);
+                        GenerationContext.AddTransformationUnits(generatedTransformationUnits);
+                    }
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine($"Failed to transform struct {@struct.NativeName}: {e.Message}");
+                }
+            }
+
+            while (_functionQueue.TryDequeue(out var function))
+            {
+                try
+                {
+                    var nativeMethod = new NativeMethod(function.NativeName,
+                        function.ReturnType, function.Parameters.ToImmutableArray());
+                    var target = new MethodTarget(nativeMethod);
+
+                    var rule = GenerationContext.Configuration.GetMethodRule(target);
+
+                    if (rule.ShouldBeGenerated)
+                    {
+                        var transformationUnit = new MethodTransformationUnit(target, rule, GenerationContext,
+                            out var generatedTransformationUnits);
+                        GenerationContext.AddTransformationUnit(transformationUnit);
+                        GenerationContext.AddTransformationUnits(generatedTransformationUnits);
+                    }
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine($"Failed to transform function {function.NativeName}: {e.Message}");
+                }
+            }
+        }
+
+        // Clangsharp methods
+
+        public CSharpOutputBuilder BeginCSharpCode()
+        {
+            return new("Whatever", _configuration);
+        }
+
+        public virtual void EndCSharpCode(CSharpOutputBuilder output)
+        {
+
+        }
+
         public virtual void BeginInnerValue()
         {
             // nop, send help ;_;
@@ -208,16 +288,7 @@ namespace ClangSharp.JNI
 
         public virtual void EndEnum(in EnumDesc desc)
         {
-            try
-            {
-                var @enum = new EnumTarget(_preliminaryEnum.JavaName, _preliminaryEnum.Constants.ToImmutableArray());
-                GenerationContext.AddTransformationUnit(new EnumTransformationUnit(@enum));
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine($"Failed to transform enum {_preliminaryEnum.JavaName}: {e.Message}");
-            }
-
+            _enumQueue.Enqueue(_preliminaryEnum);
             _preliminaryEnum = null;
         }
 
@@ -365,21 +436,7 @@ namespace ClangSharp.JNI
                 return;
             }
 
-            try
-            {
-                var nativeMethod = new NativeMethod(_preliminaryFunction.NativeName,
-                    _preliminaryFunction.ReturnType, _preliminaryFunction.Parameters.ToImmutableArray());
-
-                var transformationUnit = new MethodTransformationUnit(new MethodTarget(nativeMethod), GenerationContext,
-                    out var generatedTransformationUnits);
-                GenerationContext.AddTransformationUnit(transformationUnit);
-                GenerationContext.AddTransformationUnits(generatedTransformationUnits);
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine($"Failed to transform function {_preliminaryFunction.NativeName}: {e.Message}");
-            }
-
+            _functionQueue.Enqueue(_preliminaryFunction);
             _preliminaryFunction = null;
         }
 
@@ -387,10 +444,7 @@ namespace ClangSharp.JNI
         {
             if (info.IsComplete)
             {
-                var javaName = JavaConventions.EscapeName(info.EscapedName);
-
-                _preliminaryStruct =
-                    new PreliminaryStruct(javaName, GenerationContext.StructTypeInContainer(javaName));
+                _preliminaryStruct = new PreliminaryStruct(info.EscapedName);
             }
         }
 
@@ -421,22 +475,7 @@ namespace ClangSharp.JNI
                 return;
             }
 
-            try
-            {
-                var target = new StructTarget(info.EscapedName, _preliminaryStruct.JavaName,
-                    GenerationContext.NestedTypeInContainer(_preliminaryStruct.JavaName),
-                    _preliminaryStruct.Fields.ToImmutableArray());
-
-                var transformationUnit =
-                    new StructTransformationUnit(target, GenerationContext, out var generatedTransformationUnits);
-                GenerationContext.AddTransformationUnit(transformationUnit);
-                GenerationContext.AddTransformationUnits(generatedTransformationUnits);
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine($"Failed to transform struct {_preliminaryStruct.JavaName}: {e.Message}");
-            }
-
+            _structQueue.Enqueue(_preliminaryStruct);
             _preliminaryStruct = null;
         }
 
@@ -451,16 +490,6 @@ namespace ClangSharp.JNI
         }
 
         public virtual void EmitSystemSupport()
-        {
-            // nop, send help ;_;
-        }
-
-        public CSharpOutputBuilder BeginCSharpCode()
-        {
-            return new("Whatever", _configuration);
-        }
-
-        public virtual void EndCSharpCode(CSharpOutputBuilder output)
         {
             // nop, send help ;_;
         }
@@ -592,14 +621,12 @@ namespace ClangSharp.JNI
 
         private class PreliminaryStruct
         {
-            public PreliminaryStruct(string javaName, ObjectJavaType javaType)
+            public PreliminaryStruct(string nativeName)
             {
-                JavaName = javaName;
-                JavaType = javaType;
+                NativeName = nativeName;
             }
 
-            public string JavaName { get; }
-            public ObjectJavaType JavaType { get; }
+            public string NativeName { get; }
 
             public List<StructField> Fields { get; } = new();
         }

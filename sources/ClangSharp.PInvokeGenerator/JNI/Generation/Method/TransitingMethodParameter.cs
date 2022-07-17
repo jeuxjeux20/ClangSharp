@@ -95,7 +95,7 @@ internal record TransitingMethodParameter
     }
 
     public MethodParameter<JavaType>? AsJavaParameter(bool nullsIfReceiver) =>
-        JavaType is not null && (nullsIfReceiver ^ IsJavaReceiver)
+        JavaType is not null && (!nullsIfReceiver || !IsJavaReceiver)
             ? new MethodParameter<JavaType>(JavaType, Name)
             : null;
 

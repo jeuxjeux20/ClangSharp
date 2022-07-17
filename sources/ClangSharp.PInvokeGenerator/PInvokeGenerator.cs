@@ -269,6 +269,7 @@ namespace ClangSharp
                         sw.WriteLine($"package {_config.DefaultNamespace};");
                         sw.WriteLine();
                         sw.WriteLine("import com.github.novelrt.fumocement.*;");
+                        sw.WriteLine("import com.github.novelrt.fumocement.layout.*;");
                         sw.WriteLine("import java.nio.charset.*;");
                     }
                 }

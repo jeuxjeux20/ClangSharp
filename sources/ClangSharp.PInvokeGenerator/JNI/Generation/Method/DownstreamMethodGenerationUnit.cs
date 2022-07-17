@@ -43,7 +43,8 @@ internal class DownstreamMethodGenerationUnit : MethodGenerationUnit
         JavaNativeMethod = new BodylessJavaMethod(
             generationProperties.JniProxyName,
             returnValueLinkage?.JniType.AsJavaNonObject() ?? JavaType.Void,
-            FilterParameters(x => x.AsJavaJniParameter()));
+            FilterParameters(x => x.AsJavaJniParameter()),
+            generationProperties.ExposeRawMethod ? "public" : "private");
 
         JniProxyMethod = new JniGlueMethod(
             JavaConventions.JniProxyMethodName(generationProperties.ContainingType, generationProperties.JniProxyName),
@@ -55,4 +56,5 @@ internal class DownstreamMethodGenerationUnit : MethodGenerationUnit
 
 internal readonly record struct DownstreamMethodGenerationProperties(string JavaName, string JniProxyName,
     ObjectJavaType ContainingType,
+    bool ExposeRawMethod = false,
     bool IsJavaInstanceMethod = false);

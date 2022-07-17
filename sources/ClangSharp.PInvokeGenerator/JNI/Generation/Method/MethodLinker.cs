@@ -26,7 +26,8 @@ internal abstract class MethodLinker
     private ValuePosition Position =>
         _currentParameter is null ? ValuePosition.ReturnType : ValuePosition.Parameter;
 
-    public MethodLinker(NativeOperation operation, JniGenerationContext context, TransitionDirection transitionDirection)
+    public MethodLinker(NativeOperation operation, JniGenerationContext context,
+        TransitionDirection transitionDirection)
     {
         _context = context;
         _transitionDirection = transitionDirection;
@@ -113,12 +114,30 @@ internal abstract class MethodLinker
 
 
         JniType jniType;
-        if (type.AsRawString is "size_t" or "usize_t")
+        bool unsignedAnnotation = false;
+        // size_t, uintptr_t, etc.
+        if (type.IsPointerLikeType(out var sizeTypeName))
         {
             // (We're assuming a 64-bit system.)
             // This is to alleviate an issue with headers giving unsigned int instead of unsigned long long
             // for size_t.
             jniType = JniType.JLong;
+            if (sizeTypeName is not null && sizeTypeName.StartsWith('u'))
+            {
+                unsignedAnnotation = true;
+            }
+        }
+        else if (type.IsFixedWidthIntegerType(out _, out var bits, out var fixedUnsigned))
+        {
+            unsignedAnnotation = fixedUnsigned && bits != 16; // jchar is a 16-bit unsigned type we can use
+            jniType = (bits, fixedUnsigned) switch {
+                (8, _) => JniType.JByte,
+                (16, false) => JniType.JShort,
+                (16, true) => JniType.JChar,
+                (32, _) => JniType.JInt,
+                (64, _) => JniType.JLong,
+                _ => throw new InvalidOperationException()
+            };
         }
         else
         {
@@ -129,6 +148,8 @@ internal abstract class MethodLinker
                     CXTypeKind.CXType_UChar or
                     CXTypeKind.CXType_SChar or
                     CXTypeKind.CXType_Char_S => JniType.JByte,
+
+                CXTypeKind.CXType_Short => JniType.JShort,
 
                 CXTypeKind.CXType_UShort or
                     CXTypeKind.CXType_Char16 => JniType.JChar,
@@ -149,15 +170,16 @@ internal abstract class MethodLinker
             };
         }
 
-        var javaType = jniType.AsJavaNonObject();
+        unsignedAnnotation = unsignedAnnotation ||
+                   type.Kind is CXTypeKind.CXType_UInt or
+                       CXTypeKind.CXType_Char32 or
+                       CXTypeKind.CXType_Char_U or
+                       CXTypeKind.CXType_Char_S or
+                       CXTypeKind.CXType_WChar or
+                       CXTypeKind.CXType_ULong;
 
-        if (type.Kind is
-            CXTypeKind.CXType_UInt or
-            CXTypeKind.CXType_Char32 or
-            CXTypeKind.CXType_Char_U or
-            CXTypeKind.CXType_Char_S or
-            CXTypeKind.CXType_WChar or
-            CXTypeKind.CXType_ULong)
+        var javaType = jniType.AsJavaNonObject();
+        if (unsignedAnnotation)
         {
             javaType = javaType.WithAddedAnnotations("@Unsigned");
         }
@@ -210,7 +232,7 @@ internal abstract class MethodLinker
 
     private static LinkedValue LinkPointer(PointerTypeDesc type)
     {
-        var annotation = $"@Pointer(\"{type.AsRawString}\")";
+        var annotation = $"@Pointer(\"{type.AsVerbatimString}\")";
 
         return new LinkedValue(new PointerValueTransition(type)) {
             JavaType = JavaType.Long.WithAddedAnnotations(annotation), JniType = JniType.JLong, NativeType = type
@@ -219,21 +241,28 @@ internal abstract class MethodLinker
 
     private LinkedValue LinkStruct(RecordTypeDesc type)
     {
-        var javaStructClass = JavaConventions.EscapeName(type.Name);
-        var javaStructType = _context.NestedTypeInContainer(javaStructClass);
+        var structTransformation = _context
+            .GetTransformationUnits<StructTransformationUnit>()
+            .FirstOrDefault(x => x.Target.NativeName == type.Name);
+
+        var javaStructType = structTransformation?.ClassGenerationUnit.JavaStructType;
 
         TransitionAction transitionAction;
         var isNestedStruct = _operation is GetStructFieldOperation or SetStructFieldOperation;
         if (isNestedStruct)
         {
-            transitionAction = new NestedStructRefValueTransition(javaStructClass, type);
+            transitionAction = new NestedStructRefValueTransition(javaStructType!.Name, type);
         }
         else
         {
-            transitionAction = new StructCopyValueTransition(javaStructClass, type);
+            transitionAction = new StructCopyValueTransition(javaStructType?.Name, type);
         }
 
-        return new LinkedValue(transitionAction) { JavaType = javaStructType, JniType = JniType.JLong, NativeType = type };
+        return new LinkedValue(transitionAction) {
+            JavaType = (JavaType?)javaStructType ?? JavaType.Long.WithAddedAnnotations($"@Pointer(\"{type.Name}*\")"),
+            JniType = JniType.JLong,
+            NativeType = type
+        };
     }
 
     private LinkedValue LinkEnum(EnumTypeDesc type)

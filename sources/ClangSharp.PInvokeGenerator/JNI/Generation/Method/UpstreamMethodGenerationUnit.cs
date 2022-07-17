@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using ClangSharp.Abstractions;
+using ClangSharp.JNI.Generation.Configuration;
 using ClangSharp.JNI.Generation.FunctionPointer;
 using ClangSharp.JNI.Java;
 using ClangSharp.JNI.JNIGlue;
@@ -44,6 +45,7 @@ internal class UpstreamMethodGenerationUnit : MethodGenerationUnit
             methodGenerationProperties.Namings.CallbackInterfaceMethod,
             returnValueLinkage?.JavaType ?? JavaType.Void,
             FilterParameters(x => x.AsJavaParameter(nullsIfReceiver: true)),
+            "public",
             isNative: false,
             isStatic: false);
 
@@ -66,4 +68,4 @@ internal class UpstreamMethodGenerationUnit : MethodGenerationUnit
 }
 
 internal readonly record struct UpstreamMethodGenerationProperties(ObjectJavaType CallbackType,
-    JniGenerationNamings Namings);
+    JniNamings Namings);

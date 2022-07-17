@@ -7,6 +7,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Text;
 using System.Xml.Linq;
+using ClangSharp.JNI.Generation;
 using ClangSharp.JNI.Generation.Enum;
 using ClangSharp.JNI.Generation.FunctionPointer;
 using ClangSharp.JNI.Generation.Method;
@@ -19,7 +20,8 @@ namespace ClangSharp.JNI.Java
     internal class JavaClassesOutputBuilder : JniOutputBuilderBase
     {
         public JavaClassesOutputBuilder(string name, PInvokeGeneratorConfiguration configuration,
-            string indentationString = DefaultIndentationString) : base(name, configuration,
+            JniGenerationContext generationContext,
+            string indentationString = DefaultIndentationString) : base(name, configuration, generationContext,
             indentationString)
         {
             CurrentBraceStyle = BraceStyle.KAndR;
@@ -30,22 +32,22 @@ namespace ClangSharp.JNI.Java
 
         protected override void WriteContent()
         {
-            foreach (var @struct in GenerationContext.GetTransformationUnits<StructTransformationUnit>())
+            foreach (var @struct in GenerationContext.GetRoundTransformationUnits<StructTransformationUnit>())
             {
                 GenerateStruct(@struct);
             }
 
-            foreach (var @enum in GenerationContext.GetTransformationUnits<EnumTransformationUnit>())
+            foreach (var @enum in GenerationContext.GetRoundTransformationUnits<EnumTransformationUnit>())
             {
                 GenerateEnumClass(@enum.ClassGenerationUnit);
             }
 
-            foreach (var funcPointer in GenerationContext.GetTransformationUnits<FunctionPointerTransformationUnit>())
+            foreach (var funcPointer in GenerationContext.GetRoundTransformationUnits<FunctionPointerTransformationUnit>())
             {
                 GenerateCallbackInterface(funcPointer);
             }
 
-            foreach (var methodGen in GenerationContext.GetTransformationUnits<MethodTransformationUnit>())
+            foreach (var methodGen in GenerationContext.GetRoundTransformationUnits<MethodTransformationUnit>())
             {
                 GenerateDownstreamMethod(methodGen.MethodGenerationUnit);
             }
@@ -65,6 +67,26 @@ namespace ClangSharp.JNI.Java
             WriteIndentedLine($"public static native void {StructClassGenerationUnit.OverwriteMethodName}(" +
                               $"@Pointer(\"{@struct.NativeName}*\") long targetHandle, " +
                               $"@Pointer(\"{@struct.NativeName}*\") long dataHandle);");
+
+            if (structTransformationUnit.LayoutMetaGenerationUnit is {} layoutMetaGen)
+            {
+                var namings = GenerationContext.Configuration.Namings;
+
+                WriteNewLine();
+                WriteIndentedLine("// Struct layout metadata");
+                WriteIndentedLine($"private static final StructLayoutArranger {JniInternalNames.StructArrangerField} " +
+                                  "= new StructLayoutArranger();");
+                WriteNewLine();
+                foreach (var (type, name) in layoutMetaGen.OffsetFields)
+                {
+                    WriteIndentedLine($"public static final long {name} = {type.OffsetValueExpression};");
+                }
+                WriteNewLine();
+                WriteIndentedLine($"public static final TypeLayout {namings.StructMetaLayoutField} " +
+                                  $"= {JniInternalNames.StructArrangerField}.completeStruct();");
+                WriteIndentedLine($"public static final long {namings.StructMetaSizeField} " +
+                                  $"= {namings.StructMetaLayoutField}.getSize();");
+            }
 
             WriteNewLine();
             WriteIndentedLine($"private static final NativeObjectTracker<{className}> ownedTracker = " +
@@ -151,7 +173,7 @@ namespace ClangSharp.JNI.Java
             var nativeMethod = methodGen.JavaNativeMethod;
             var publicMethod = methodGen.JavaMethod;
 
-            WriteBodylessMethod(nativeMethod, "public");
+            WriteBodylessMethod(nativeMethod);
 
             BeginFullJavaMethod(publicMethod);
 
@@ -169,7 +191,7 @@ namespace ClangSharp.JNI.Java
             var callbackMethod = methodGen.CallbackMethod;
             var callbackCallerMethod = methodGen.CallbackCallerMethod;
 
-            WriteBodylessMethod(callbackMethod, "public");
+            WriteBodylessMethod(callbackMethod);
 
             BeginFullJavaMethod(callbackCallerMethod);
 
@@ -189,13 +211,12 @@ namespace ClangSharp.JNI.Java
             EndFullJavaMethod();
         }
 
-        // TODO: Move visibility to method
-        private void WriteBodylessMethod(BodylessJavaMethod method, string visibility)
+        private void WriteBodylessMethod(BodylessJavaMethod method)
         {
             WriteIndentedLine();
-            if (!string.IsNullOrEmpty(visibility))
+            if (!string.IsNullOrEmpty(method.Visibility))
             {
-                Write(visibility);
+                Write(method.Visibility);
                 Write(' ');
             }
 

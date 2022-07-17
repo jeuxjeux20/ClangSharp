@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using ClangSharp.JNI.Generation;
 using ClangSharp.JNI.Generation.FunctionPointer;
 using ClangSharp.JNI.Generation.Method;
 using ClangSharp.JNI.Generation.Struct;
@@ -17,8 +18,9 @@ namespace ClangSharp.JNI.JNIGlue
     {
         public JniGlueOutputBuilder(string name,
             PInvokeGeneratorConfiguration configuration,
-            string indentationString = DefaultIndentationString) : base(name,
-            configuration, indentationString)
+            JniGenerationContext generationContext,
+            string indentationString = DefaultIndentationString)
+            : base(name, configuration, generationContext, indentationString)
         {
         }
 
@@ -27,7 +29,7 @@ namespace ClangSharp.JNI.JNIGlue
 
         protected override void WriteContent()
         {
-            foreach (var structUnit in GenerationContext.GetTransformationUnits<StructTransformationUnit>())
+            foreach (var structUnit in GenerationContext.GetRoundTransformationUnits<StructTransformationUnit>())
             {
                 var @struct = structUnit.Target;
                 WriteIndentedLine($"// Struct declaration: {@struct.NativeName}");
@@ -42,7 +44,7 @@ namespace ClangSharp.JNI.JNIGlue
                 WriteIndentedLine($"// End struct declaration: {@struct.NativeName}");
             }
 
-            foreach (var method in GenerationContext.GetTransformationUnits<MethodTransformationUnit>())
+            foreach (var method in GenerationContext.GetRoundTransformationUnits<MethodTransformationUnit>())
             {
                 WriteMethod(method.MethodGenerationUnit);
             }

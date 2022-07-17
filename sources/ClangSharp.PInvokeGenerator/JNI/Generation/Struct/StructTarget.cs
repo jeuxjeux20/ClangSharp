@@ -6,8 +6,7 @@ using ClangSharp.JNI.Java;
 
 namespace ClangSharp.JNI.Generation.Struct;
 
-internal record StructTarget(string NativeName, string JavaName, ObjectJavaType JavaStructType,
-    ImmutableArray<StructField> Fields) : TransformationTarget
+internal record StructTarget(string NativeName, ImmutableArray<StructField> Fields) : TransformationTarget
 {
     public RecordTypeDesc NativeStructType { get; } = new(NativeName);
 }

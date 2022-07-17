@@ -21,7 +21,7 @@ internal class CharPointerStringValueTransition : TransitionAction
     public override GeneratedExpression TransitValue(string valueExpression,
         TransitionKind transitionKind, MethodGenerationUnit generationUnit)
     {
-        return (StringDeletionParameterName, direction: transitionKind) switch
+        return (StringDeletionParameterName, transitionKind) switch
         {
             (_, TransitionKind.JavaToJni)
                 => $"{valueExpression}.getBytes()",

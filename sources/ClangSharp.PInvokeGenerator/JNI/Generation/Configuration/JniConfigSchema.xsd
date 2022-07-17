@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information. -->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:tns="https://novelrt.org/jni-generation-config"
+            targetNamespace="https://novelrt.org/jni-generation-config"
+            elementFormDefault="qualified">
+    <xsd:element name="JniGenerationConfiguration" type="tns:JniGenerationConfiguration"/>
+
+    <xsd:complexType name="JniGenerationConfiguration">
+        <xsd:annotation>
+            <xsd:documentation>
+                Configuration for the JNI binding generator.
+            </xsd:documentation>
+        </xsd:annotation>
+        <xsd:sequence>
+            <xsd:element minOccurs="0" name="Namings" type="tns:JniNamings"/>
+            <xsd:choice minOccurs="0" maxOccurs="unbounded">
+                <xsd:element name="MethodRule" type="tns:MethodRule"/>
+                <xsd:element name="StructRule" type="tns:StructRule"/>
+            </xsd:choice>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:complexType name="JniNamings">
+        <xsd:all>
+            <xsd:element minOccurs="0" name="CallbackInterfaceMethod" type="xsd:string"/>
+            <xsd:element minOccurs="0" name="CallbackInterfaceCallerMethod" type="xsd:string"/>
+            <xsd:element minOccurs="0" name="StructMetaOffsetFieldFormat" type="xsd:string"/>
+            <xsd:element minOccurs="0" name="StructMetaLayoutField" type="xsd:string"/>
+            <xsd:element minOccurs="0" name="StructMetaSizeField" type="xsd:string"/>
+        </xsd:all>
+    </xsd:complexType>
+
+    <xsd:complexType name="MethodRule">
+        <xsd:annotation>
+            <xsd:documentation>
+                Configures the binding of C methods to Java.
+            </xsd:documentation>
+        </xsd:annotation>
+        <xsd:all>
+            <xsd:element minOccurs="0" name="NameOverride" type="xsd:string"/>
+            <xsd:element minOccurs="0" name="Exclude" type="xsd:boolean"/>
+            <xsd:element minOccurs="0" name="ExposeRawMethod" type="xsd:boolean"/>
+        </xsd:all>
+        <xsd:attribute name="Pattern" type="tns:RegularExpression"/>
+    </xsd:complexType>
+
+    <xsd:complexType name="StructRule">
+        <xsd:annotation>
+            <xsd:documentation>
+                Configures the binding and generation of C structs to Java.
+            </xsd:documentation>
+        </xsd:annotation>
+        <xsd:all>
+            <xsd:element minOccurs="0" name="NameOverride" type="xsd:string"/>
+            <xsd:element minOccurs="0" name="Exclude" type="xsd:boolean"/>
+            <xsd:element minOccurs="0" name="GenerateLayoutMeta" type="xsd:boolean"/>
+        </xsd:all>
+        <xsd:attribute name="Pattern" type="tns:RegularExpression"/>
+    </xsd:complexType>
+
+    <xsd:simpleType name="RegularExpression">
+        <xsd:annotation>
+            <xsd:documentation>
+                A .NET-flavored regular expression.
+            </xsd:documentation>
+        </xsd:annotation>
+        <xsd:union memberTypes="xsd:string"/>
+    </xsd:simpleType>
+</xsd:schema>

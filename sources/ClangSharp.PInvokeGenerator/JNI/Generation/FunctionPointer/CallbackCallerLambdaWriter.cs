@@ -13,7 +13,7 @@ internal static class CallbackCallerLambdaWriter
         var lambda = upstreamMethodGen.JniCallbackCallerLambda;
 
         writer.Write("[]");
-        writer.RawBuilder.AppendMethodParameters(lambda.Parameters, p => $"{p.Type.AsRawString} {p.Name}");
+        writer.RawBuilder.AppendMethodParameters(lambda.Parameters, p => $"{p.Type.AsVerbatimString} {p.Name}");
         writer.Write(" -> ");
         writer.Write(lambda.ReturnType);
         writer.WriteBlockStart();

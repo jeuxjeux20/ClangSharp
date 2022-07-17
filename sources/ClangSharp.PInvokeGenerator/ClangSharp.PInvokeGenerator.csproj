@@ -3,11 +3,17 @@
 
   <PropertyGroup>
     <RootNamespace>ClangSharp</RootNamespace>
-    <TargetFrameworks>net6.0</TargetFrameworks>
+    <TargetFramework>net6.0</TargetFramework>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\ClangSharp\ClangSharp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="JNI\Generation\Configuration\JniConfigSchema.xsd">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

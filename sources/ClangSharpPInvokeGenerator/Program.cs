@@ -101,6 +101,7 @@ namespace ClangSharp
             AddHeaderOption(s_rootCommand);
             AddIncludeOption(s_rootCommand);
             AddIncludeDirectoryOption(s_rootCommand);
+            AddJniConfigOption(s_rootCommand);
             AddLanguageOption(s_rootCommand);
             AddLibraryOption(s_rootCommand);
             AddMethodClassNameOption(s_rootCommand);
@@ -141,6 +142,7 @@ namespace ClangSharp
             var headerFile = context.ParseResult.ValueForOption<string>("--headerFile");
             var includedNames = context.ParseResult.ValueForOption<string[]>("--include");
             var includeDirectories = context.ParseResult.ValueForOption<string[]>("--include-directory");
+            var jniConfig = context.ParseResult.ValueForOption<string>("--jni-config");
             var language = context.ParseResult.ValueForOption<string>("--language");
             var libraryPath = context.ParseResult.ValueForOption<string>("--libraryPath");
             var methodClassName = context.ParseResult.ValueForOption<string>("--methodClassName");
@@ -563,6 +565,7 @@ namespace ClangSharp
                 DefaultClass = methodClassName,
                 ExcludedNames = excludedNames,
                 IncludedNames = includedNames,
+                JniConfig = jniConfig,
                 LibraryPath = libraryPath,
                 MethodPrefixToStrip = methodPrefixToStrip,
                 MethodClassName = methodClassName,
@@ -908,6 +911,19 @@ namespace ClangSharp
                 argumentType: typeof(string),
                 getDefaultValue: Array.Empty<string>,
                 arity: ArgumentArity.OneOrMore
+            );
+
+            rootCommand.AddOption(option);
+        }
+
+        private static void AddJniConfigOption(RootCommand rootCommand)
+        {
+            var option = new Option(
+                aliases: new string[] { "--jni-config", "-j" },
+                description: "The path to an XML file containing configuration for generating JNI bindings.",
+                argumentType: typeof(string),
+                getDefaultValue: () => string.Empty,
+                arity: ArgumentArity.ExactlyOne
             );
 
             rootCommand.AddOption(option);

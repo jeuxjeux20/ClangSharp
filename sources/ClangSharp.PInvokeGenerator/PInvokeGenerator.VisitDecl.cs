@@ -413,7 +413,7 @@ namespace ClangSharp
 
             var desc = new FieldDesc {
                 AccessSpecifier = accessSpecifier,
-                NativeCanonicalType = TypeDesc.Create(type.CanonicalType, type),
+                NativeCanonicalType = TypeDesc.Create(type),
                 NativeTypeName = nativeTypeName,
                 EscapedName = escapedName,
                 ParentName = GetRemappedCursorName(fieldDecl.Parent),
@@ -534,7 +534,7 @@ namespace ClangSharp
             var desc = new FunctionOrDelegateDesc {
                 AccessSpecifier = accessSppecifier,
                 NativeTypeName = nativeTypeName,
-                CanonicalNativeType = TypeDesc.Create(type.CanonicalType, type),
+                CanonicalNativeType = TypeDesc.Create(type),
                 EscapedName = escapedName,
                 ParentName = parentName,
                 EntryPoint = entryPoint,
@@ -1082,7 +1082,7 @@ namespace ClangSharp
                     Name = escapedName,
                     Type = typeName,
                     NativeTypeName = nativeTypeName,
-                    CanonicalNativeType = TypeDesc.Create(type.CanonicalType, type),
+                    CanonicalNativeType = TypeDesc.Create(type),
                     CppAttributes = _config.GenerateCppAttributes
                         ? parmVarDecl.Attrs.Select(x => EscapeString(x.Spelling))
                         : null,
@@ -1184,7 +1184,7 @@ namespace ClangSharp
                     Name = escapedName,
                     Type = typeName,
                     NativeTypeName = nativeTypeName,
-                    CanonicalNativeType = TypeDesc.Create(type.CanonicalType, type),
+                    CanonicalNativeType = TypeDesc.Create(type),
                     CppAttributes = _config.GenerateCppAttributes
                         ? parmVarDecl.Attrs.Select(x => EscapeString(x.Spelling))
                         : null,
@@ -2746,7 +2746,7 @@ namespace ClangSharp
                     var fieldDesc = new FieldDesc {
                         AccessSpecifier = accessSpecifier,
                         NativeTypeName = null,
-                        NativeCanonicalType = TypeDesc.Create(type.CanonicalType, type),
+                        NativeCanonicalType = TypeDesc.Create(type),
                         EscapedName = fieldName,
                         Offset = null,
                         NeedsNewKeyword = false,
@@ -2923,7 +2923,7 @@ namespace ClangSharp
                         AccessSpecifier = GetAccessSpecifier(typedefDecl),
                         CallingConvention = callingConventionName,
                         EscapedName = escapedName,
-                        CanonicalNativeType = TypeDesc.Create(functionProtoType.CanonicalType, functionProtoType),
+                        CanonicalNativeType = TypeDesc.Create(functionProtoType),
                         IsVirtual = true, // such that it outputs as a delegate
                         IsUnsafe = IsUnsafe(typedefDecl, functionProtoType),
                         NativeTypeName = nativeTypeName,

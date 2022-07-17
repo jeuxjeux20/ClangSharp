@@ -2,6 +2,7 @@
 
 using System.Collections.Generic;
 using System.Linq;
+using ClangSharp.JNI.Generation.Configuration;
 using ClangSharp.JNI.Java;
 
 namespace ClangSharp.JNI.Generation;
@@ -9,6 +10,7 @@ namespace ClangSharp.JNI.Generation;
 internal class JniGenerationContext
 {
     public string Package { get; set; }
+    public JniGenerationConfiguration Configuration { get; }
     public string ContainerClass { get; set; }
 
     public ObjectJavaType ContainerType { get; }
@@ -16,35 +18,42 @@ internal class JniGenerationContext
     private readonly List<TransformationUnit> _transformationUnits = new();
     public IReadOnlyList<TransformationUnit> TransformationUnits => _transformationUnits;
 
-    public JniGenerationNamings Namings { get; }
 
-    public JniGenerationContext(string package, string containerClass = "Native", JniGenerationNamings? namings = null)
+    private readonly List<TransformationUnit> _roundTransformationUnits = new();
+    public IReadOnlyList<TransformationUnit> RoundTransformationUnits => _roundTransformationUnits;
+
+    public JniGenerationContext(string package, JniGenerationConfiguration configuration,
+        string containerClass = "Native")
     {
         Package = package;
+        Configuration = configuration;
         ContainerClass = containerClass;
         ContainerType = new ObjectJavaType(Package, ContainerClass);
-        Namings = namings ?? JniGenerationNamings.Default;
     }
 
     public void AddTransformationUnit(TransformationUnit unit)
     {
         _transformationUnits.Add(unit);
+        _roundTransformationUnits.Add(unit);
     }
 
-    public void AddTransformationUnits(IEnumerable<TransformationUnit> units)
+    public void AddTransformationUnits(IReadOnlyCollection<TransformationUnit> units)
     {
         _transformationUnits.AddRange(units);
+        _roundTransformationUnits.AddRange(units);
+    }
+
+    public void NewRound()
+    {
+        _roundTransformationUnits.Clear();
     }
 
     public IEnumerable<T> GetTransformationUnits<T>() where T : TransformationUnit
         => TransformationUnits.OfType<T>();
 
+    public IEnumerable<T> GetRoundTransformationUnits<T>() where T : TransformationUnit
+        => RoundTransformationUnits.OfType<T>();
+
     public ObjectJavaType NestedTypeInContainer(string name)
         => new(Package, $"{ContainerClass}.{name}");
-
-    public ObjectJavaType StructTypeInContainer(string name)
-        => new(Package, $"{ContainerClass}.{StructTypeName(name)}");
-
-    public static string StructTypeName(string name)
-        => $"{name}";
 }

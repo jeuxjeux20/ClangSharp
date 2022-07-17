@@ -21,7 +21,7 @@ internal sealed class PointerValueTransition : TransitionAction
         return transitionKind switch {
             TransitionKind.JavaToJni => valueExpression,
             TransitionKind.JniToNative
-                => $"FumoCement::toNativePointer<{PointerType.PointeeType.AsRawString}>({valueExpression})",
+                => $"FumoCement::toNativePointer<{PointerType.PointeeType.AsVerbatimString}>({valueExpression})",
 
             TransitionKind.NativeToJni => $"FumoCement::toJavaPointer({valueExpression})",
             TransitionKind.JniToJava => valueExpression,

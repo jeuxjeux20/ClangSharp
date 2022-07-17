@@ -20,7 +20,7 @@ internal class FunctionPointerTransformationUnit : TransformationUnit<FunctionPo
 
         MethodGenerationUnit = UpstreamMethodGenerationUnit.UseLinker(
             new UpstreamMethodLinker(operation, context),
-            new UpstreamMethodGenerationProperties(InterfaceGenerationUnit.JavaType, context.Namings),
+            new UpstreamMethodGenerationProperties(InterfaceGenerationUnit.JavaType, context.Configuration.Namings),
             out generatedTransformationUnits);
     }
 }

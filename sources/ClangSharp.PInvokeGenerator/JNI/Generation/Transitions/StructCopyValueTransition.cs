@@ -4,13 +4,15 @@ using ClangSharp.Abstractions;
 using ClangSharp.JNI.Generation.Method;
 
 namespace ClangSharp.JNI.Generation.Transitions;
-
+#nullable enable
 internal class StructCopyValueTransition : TransitionAction
 {
-    public string JavaStructClass { get; }
+    public string? JavaStructClass { get; }
     public RecordTypeDesc NativeType { get; }
 
-    public StructCopyValueTransition(string javaStructClass, RecordTypeDesc nativeType)
+    private bool HasJavaStruct => JavaStructClass is not null;
+
+    public StructCopyValueTransition(string? javaStructClass, RecordTypeDesc nativeType)
     {
         JavaStructClass = javaStructClass;
         NativeType = nativeType;
@@ -19,12 +21,15 @@ internal class StructCopyValueTransition : TransitionAction
     public override GeneratedExpression TransitValue(string valueExpression,
         TransitionKind transitionKind, MethodGenerationUnit generationUnit)
     {
+        // We may have no struct found for some reason (such as an exclusion in configs)
+        // Instead, we just directly use a pointer to the struct.
         return transitionKind switch {
-            TransitionKind.JavaToJni => $"{valueExpression}.getHandle()",
+            TransitionKind.JavaToJni => HasJavaStruct ? $"{valueExpression}.getHandle()" : valueExpression,
             TransitionKind.JniToNative => $"*FumoCement::toNativePointer<{NativeType.Name}>({valueExpression})",
 
             TransitionKind.NativeToJni => $"FumoCement::toJavaPointer(new {NativeType.Name}({valueExpression}))",
-            TransitionKind.JniToJava => $"{JavaStructClass}.getTrackedAndOwned({valueExpression})",
+            TransitionKind.JniToJava => HasJavaStruct ?
+                $"{JavaStructClass}.getTrackedAndOwned({valueExpression})" : valueExpression,
             _ => throw new UnsupportedJniScenarioException()
         };
     }

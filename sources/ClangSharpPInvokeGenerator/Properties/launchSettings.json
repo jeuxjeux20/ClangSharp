@@ -19,11 +19,11 @@
     },
     "GenerateCpp": {
       "commandName": "Project",
-      "commandLineArgs": " --file \"D:\\RidiculousClangTests\\legit_c_header.h\" -n fumocement.testbindings -o D:\\RidiculousClangTests\\outputglue.h --define-macro _ALLOW_COMPILER_AND_STL_VERSION_MISMATCH --output-mode JniGlue -m Native"
+      "commandLineArgs": " --file \"D:\\RidiculousClangTests\\legit_c_header.h\" -n fumocement.testbindings -o D:\\RidiculousClangTests\\outputglue.h -j D:\\RidiculousClangTests\\config.xml --define-macro _ALLOW_COMPILER_AND_STL_VERSION_MISMATCH --output-mode JniGlue -m Native"
     },
     "GenerateJava": {
       "commandName": "Project",
-      "commandLineArgs": " --file \"D:\\RidiculousClangTests\\legit_c_header.h\" -n fumocement.testbindings -o D:\\RidiculousClangTests\\Native.java --define-macro _ALLOW_COMPILER_AND_STL_VERSION_MISMATCH --output-mode JavaClasses -m Native"
+      "commandLineArgs": " --file \"D:\\RidiculousClangTests\\legit_c_header.h\" -n fumocement.testbindings -o D:\\RidiculousClangTests\\Native.java -j D:\\RidiculousClangTests\\config.xml --define-macro _ALLOW_COMPILER_AND_STL_VERSION_MISMATCH --output-mode JavaClasses -m Native"
     }
   }
 }

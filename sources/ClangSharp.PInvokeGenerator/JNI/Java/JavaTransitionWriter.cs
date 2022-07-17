@@ -47,12 +47,12 @@ internal static class JavaTransitionWriter
                     ? returnLinkage.JavaJniType
                     : returnLinkage.JavaType;
 
-                writer.Write($"{returnType} {JniGenerationNamings.Internal.ReturnValueIntermediate} = ");
+                writer.Write($"{returnType} {JniInternalNames.ReturnValueIntermediate} = ");
                 writer.Write(makeFinalMethodCall(parameters));
                 writer.Write(";");
                 writer.WriteIndentedLine();
 
-                finalExpression = JniGenerationNamings.Internal.ReturnValueIntermediate;
+                finalExpression = JniInternalNames.ReturnValueIntermediate;
             }
             else
             {

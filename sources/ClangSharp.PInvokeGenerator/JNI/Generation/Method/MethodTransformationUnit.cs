@@ -2,6 +2,7 @@
 
 #nullable enable
 using System.Collections.Immutable;
+using ClangSharp.JNI.Generation.Configuration;
 
 namespace ClangSharp.JNI.Generation.Method;
 
@@ -12,15 +13,16 @@ internal sealed class MethodTransformationUnit : TransformationUnit<MethodTarget
 {
     public DownstreamMethodGenerationUnit MethodGenerationUnit { get; }
 
-    public MethodTransformationUnit(MethodTarget target, JniGenerationContext context,
+    public MethodTransformationUnit(MethodTarget target, MethodRule rule, JniGenerationContext context,
         out ImmutableArray<TransformationUnit> generatedTransformationUnits) : base(target)
     {
         var operation = new CallNativeMethodOperation(target.Method);
-        var methodName = target.Method.Name;
+        var methodName = rule.NameOverride ?? target.Method.Name;
 
         MethodGenerationUnit = DownstreamMethodGenerationUnit.UseLinker(
             new DownstreamMethodLinker(operation, context),
-            new DownstreamMethodGenerationProperties(methodName, methodName + "Raw", context.ContainerType),
+            new DownstreamMethodGenerationProperties(methodName, methodName + "Raw",
+                context.ContainerType, rule.ShouldExposeRawMethod),
             out generatedTransformationUnits);
     }
 }

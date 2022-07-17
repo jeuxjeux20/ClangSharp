@@ -37,12 +37,12 @@ internal class JniGlueTransitionWriter
             string finalExpression;
             if (returnLinkage.TransitionAction.NeedsIntermediateReturnValue)
             {
-                writer.Write($"auto&& {JniGenerationNamings.Internal.ReturnValueIntermediate} = ");
+                writer.Write($"auto&& {JniInternalNames.ReturnValueIntermediate} = ");
                 writer.Write(nativeOpExpression);
                 writer.Write(";");
                 writer.WriteIndentedLine();
 
-                finalExpression = JniGenerationNamings.Internal.ReturnValueIntermediate;
+                finalExpression = JniInternalNames.ReturnValueIntermediate;
             }
             else
             {

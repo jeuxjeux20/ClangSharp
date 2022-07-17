@@ -8,7 +8,7 @@ using System.Text;
 using ClangSharp.Abstractions;
 using ClangSharp.JNI.Generation.Method;
 using ClangSharp.JNI.Java;
-using static ClangSharp.JNI.Generation.JniGenerationNamings.Internal;
+using static ClangSharp.JNI.Generation.JniInternalNames;
 
 namespace ClangSharp.JNI.Generation.FunctionPointer;
 #nullable enable
@@ -35,19 +35,15 @@ internal record RunCallbackOperation(FunctionProtoTypeDesc FunctionPointerType, 
 
         writer.WriteIndentedLine($"auto&& {CallbackLambdaClassId} = FumoCement::getCachedClass<");
         writer.RawBuilder.AppendTemplateString(upstreamMethodGen.CallbackType.FullJniClass);
-        writer.Write(">(");
-        writer.Write(upstreamMethodGen.CallbackObjectParameter.IntermediateName);
-        writer.Write(");");
+        writer.Write($">({CallbackLambdaContext}->getEnv());");
 
-        writer.WriteIndentedLine($"auto&& {CallbackLambdaClassId} = FumoCement::getCachedStaticMethod<");
+        writer.WriteIndentedLine($"auto&& {CallbackLambdaMethodId} = FumoCement::getCachedStaticMethod<");
         writer.RawBuilder.AppendTemplateString(upstreamMethodGen.CallbackType.FullJniClass);
         writer.Write(", ");
         writer.RawBuilder.AppendTemplateString(upstreamMethodGen.CallbackCallerMethod.Name);
         writer.Write(", ");
         writer.RawBuilder.AppendTemplateString(upstreamMethodGen.CallbackCallerMethod.JniSignature);
-        writer.Write(">(");
-        writer.Write(upstreamMethodGen.CallbackObjectParameter.IntermediateName);
-        writer.Write(");");
+        writer.Write($">({CallbackLambdaContext}->getEnv());");
     }
 
     public override string GenerateRunExpression(MethodGenerationUnit generationUnit)
@@ -57,7 +53,6 @@ internal record RunCallbackOperation(FunctionProtoTypeDesc FunctionPointerType, 
 
         var builder = new StringBuilder();
 
-        var contextParameter = parameterLinkages[^1].TransitingParameter.IntermediateName;
         var method = returnLinkage?.JniType switch {
             null or { Kind: JavaTypeKind.Void } => "CallStaticVoidMethod",
             { Kind: JavaTypeKind.Object or JavaTypeKind.Array } => "CallStaticObjectMethod",
@@ -73,9 +68,9 @@ internal record RunCallbackOperation(FunctionProtoTypeDesc FunctionPointerType, 
         };
 
         // (context->getEnv())->CallStaticXMethod(arg1, arg2, arg3);
-        builder.Append($"({contextParameter}->getEnv())->{method}({CallbackLambdaClassId}, {CallbackLambdaMethodId}, ");
-
-        builder.AppendMethodParameters(parameterLinkages,
+        builder
+            .Append($"({CallbackLambdaContext}->getEnv())->{method}({CallbackLambdaClassId}, {CallbackLambdaMethodId}, ")
+            .AppendMethodParameters(parameterLinkages,
             linkage => linkage.TransitingParameter.GetNativeTransitExpression(),
             removeOpeningParenthesis: true);
 

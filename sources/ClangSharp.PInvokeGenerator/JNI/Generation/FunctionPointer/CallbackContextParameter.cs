@@ -7,4 +7,4 @@ namespace ClangSharp.JNI.Generation.FunctionPointer;
 
 internal record CallbackContextParameter() : NativeOperationParameter(
     new PointerTypeDesc(BuiltinTypeDesc.Void),
-    JniGenerationNamings.Internal.CallbackLambdaContext);
+    JniInternalNames.CallbackLambdaContext);

@@ -18,7 +18,7 @@ internal class CallbackObjectTransition : TransitionAction
                 _ => throw new UnsupportedJniScenarioException()
             },
             UpstreamMethodGenerationUnit => transitionKind switch {
-                TransitionKind.NativeToJni => $"{JniGenerationNamings.Internal.CallbackLambdaContext}->globalObjectRef",
+                TransitionKind.NativeToJni => $"{JniInternalNames.CallbackLambdaContext}->globalObjectRef",
                 TransitionKind.JniToJava => valueExpression,
                 _ => throw new UnsupportedJniScenarioException()
             },

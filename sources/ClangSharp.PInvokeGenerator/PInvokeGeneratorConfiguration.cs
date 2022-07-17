@@ -25,6 +25,7 @@ namespace ClangSharp
         private readonly string _methodClassName;
         private readonly string _methodPrefixToStrip;
         private readonly string _testOutputLocation;
+        private readonly string _jniConfig;
 
         private readonly SortedSet<string> _excludedNames;
         private readonly SortedSet<string> _forceRemappedNames;
@@ -73,6 +74,7 @@ namespace ClangSharp
             _libraryPath = DefaultLibraryPathValue;
             _methodPrefixToStrip = DefaultMethodPrefixToStripValue;
             _testOutputLocation = DefaultTestOutputLocationValue;
+            _jniConfig = null;
 
             _excludedNames = new SortedSet<string>();
             _forceRemappedNames = new SortedSet<string>();
@@ -93,7 +95,7 @@ namespace ClangSharp
             _withTypes = new SortedDictionary<string, string>();
             _withUsings = new SortedDictionary<string, IReadOnlyList<string>>();
 
-            if ((outputMode == PInvokeGeneratorOutputMode.Xml) && !options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateMultipleFiles) && (options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateTestsNUnit) || options.HasFlag(PInvokeGeneratorConfigurationOptions.GenerateTestsXUnit)))
+
             if (outputMode is PInvokeGeneratorOutputMode.JniGlue or PInvokeGeneratorOutputMode.JavaClasses &&
                 (options & PInvokeGeneratorConfigurationOptions.GenerateMultipleFiles) != 0)
             {
@@ -340,6 +342,18 @@ namespace ClangSharp
             init
             {
                 _testOutputLocation = string.IsNullOrWhiteSpace(value) ? DefaultTestOutputLocationValue : Path.GetFullPath(value);
+            }
+        }
+
+        public string JniConfig
+        {
+            get
+            {
+                return _jniConfig;
+            }
+            init
+            {
+                _jniConfig = value;
             }
         }
 
